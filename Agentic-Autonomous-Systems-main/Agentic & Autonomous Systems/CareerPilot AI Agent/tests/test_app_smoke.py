@@ -22,6 +22,7 @@ os.environ.update(
         "VERCEL": "",
         "SECRET_KEY": "test-only-secret",
         "SUPABASE_JWT_SECRET": "",
+        "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "",
         "GEMINI_API_KEY": "",
     }
 )
@@ -38,6 +39,8 @@ app_module.app.config.update(
 
 class FlaskSmokeTests(unittest.TestCase):
     def setUp(self):
+        with app_module._AUTH_ATTEMPTS_LOCK:
+            app_module._AUTH_ATTEMPTS.clear()
         self.client = app_module.app.test_client()
         self.user = SimpleNamespace(
             id="a4a4d19e-a75e-4df6-9873-161f2b457ceb",
@@ -452,14 +455,17 @@ class FlaskSmokeTests(unittest.TestCase):
             self.assertIsNone(app_module._auth_redirect_url())
 
     def test_google_sign_in_round_trips_pkce_verifier(self):
-        start = self.client.get("/auth/google")
-        self.assertEqual(start.status_code, 302)
-        self.assertEqual(
-            start.headers["Location"],
-            "https://accounts.google.com/o/oauth2/v2/auth",
-        )
+        with patch.object(
+            app_module, "_auth_redirect_url", return_value="http://localhost/auth/callback"
+        ):
+            start = self.client.get("/auth/google")
+            self.assertEqual(start.status_code, 302)
+            self.assertEqual(
+                start.headers["Location"],
+                "https://accounts.google.com/o/oauth2/v2/auth",
+            )
 
-        callback = self.client.get("/auth/callback?code=google-auth-code")
+            callback = self.client.get("/auth/callback?code=google-auth-code")
         self.assertEqual(callback.status_code, 302)
         self.assertEqual(callback.headers["Location"], "/dashboard")
         db.start_oauth.assert_called_once_with(
@@ -468,6 +474,55 @@ class FlaskSmokeTests(unittest.TestCase):
         db.exchange_auth_code.assert_called_once_with(
             "google-auth-code", "pkce-test-verifier"
         )
+
+    def test_admin_email_login_starts_google_oauth_without_password(self):
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": "admin@placementcare.in"}), patch.object(
+            app_module, "_auth_redirect_url", return_value="http://localhost/auth/callback"
+        ):
+            response = self.client.post(
+                "/login", data={"email": "admin@placementcare.in"}
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.headers["Location"],
+            "https://accounts.google.com/o/oauth2/v2/auth",
+        )
+        db.start_oauth.assert_called_once_with(
+            "google", "http://localhost/auth/callback"
+        )
+        db.sign_in.assert_not_called()
+        with self.client.session_transaction() as session_data:
+            self.assertEqual(
+                session_data["google_admin_email"], "admin@placementcare.in"
+            )
+
+    def test_admin_google_callback_requires_the_allowlisted_verified_identity(self):
+        self.user.email = "admin@placementcare.in"
+        self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+        self.user.app_metadata = {"provider": "google", "providers": ["google"]}
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": "admin@placementcare.in"}), patch.object(
+            app_module, "_auth_redirect_url", return_value="http://localhost/auth/callback"
+        ):
+            self.client.post("/login", data={"email": "admin@placementcare.in"})
+            callback = self.client.get("/auth/callback?code=google-auth-code")
+
+        self.assertEqual(callback.status_code, 302)
+        self.assertEqual(callback.headers["Location"], "/admin")
+        self.assertIn("careerpilot_access=", callback.headers.get("Set-Cookie", ""))
+
+    def test_admin_google_callback_rejects_a_different_google_account(self):
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": "admin@placementcare.in"}), patch.object(
+            app_module, "_auth_redirect_url", return_value="http://localhost/auth/callback"
+        ):
+            self.client.post("/login", data={"email": "admin@placementcare.in"})
+            callback = self.client.get("/auth/callback?code=google-auth-code")
+
+        self.assertEqual(callback.status_code, 302)
+        self.assertEqual(callback.headers["Location"], "/login")
+        cookie_header = callback.headers.get("Set-Cookie", "")
+        self.assertNotIn("careerpilot_access=", cookie_header)
+        self.assertNotIn("careerpilot_refresh=", cookie_header)
 
     def test_invitation_confirmation_redirects_to_password_setup(self):
         response = self.client.get(

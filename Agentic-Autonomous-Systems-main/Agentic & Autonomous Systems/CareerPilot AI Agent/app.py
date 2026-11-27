@@ -27,6 +27,9 @@ from werkzeug.utils import secure_filename
 
 APP_ROOT = Path(__file__).resolve().parent
 load_dotenv(APP_ROOT / ".env")
+load_dotenv(APP_ROOT / ".env.development.local")
+for parent in APP_ROOT.parents:
+    load_dotenv(parent / ".env.development.local")
 
 import db
 from services.storage_service import (
@@ -161,6 +164,14 @@ def apply_security_headers(response):
     return response
 
 
+def _configured_admin_emails():
+    return {
+        address.strip().lower()
+        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
+        if address.strip()
+    }
+
+
 def _user_is_admin(user):
     app_metadata = getattr(user, "app_metadata", None) or {}
     if isinstance(app_metadata, dict) and app_metadata.get("role") == "admin":
@@ -171,12 +182,7 @@ def _user_is_admin(user):
         getattr(user, "email_confirmed_at", None)
         or getattr(user, "confirmed_at", None)
     )
-    allowed_admins = {
-        address.strip().lower()
-        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
-        if address.strip()
-    }
-    if not email or email not in allowed_admins or not verified:
+    if not email or email not in _configured_admin_emails() or not verified:
         return False
 
     providers = set()
@@ -334,10 +340,10 @@ def content_page(slug):
         "skill-extractor": ("Skill Extractor", "Make your strengths easier to see. Start with your resume and build a clearer picture of the skills you can bring to your next role.", "upload", "Upload a resume", ["Surface core strengths", "Spot skills to develop", "Connect skills to career paths"]),
         "ai-mentor": ("AI Mentor", "Get thoughtful support for career decisions, interview practice, and your next professional move.", "chatbot", "Talk to your mentor", ["Career questions, answered", "Interview practice prompts", "Practical next steps"]),
         "job-matcher": ("Job Matcher", "Explore career directions that align with your interests and strengths. Start with the career paths library and use your roadmap to plan what comes next.", "careers", "Explore career paths", ["Browse role families", "Understand common skills", "Build a personal learning plan"]),
-        "blog": ("The PlacementCare journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
+        "blog": ("The CareerPilot AI journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
         "learning-hub": ("Learning hub", "Turn a big goal into small, trackable steps. Your learning plan is saved to your account and updates live across sessions.", "dashboard", "Open your dashboard", ["Create learning goals", "Track completed milestones", "See progress update in real time"]),
         "interview-prep": ("Interview prep", "Practice the moments that matter, from your opening story to the questions you want to ask.", "chatbot", "Practice with your AI mentor", ["Structure concise answers", "Prepare thoughtful questions", "Build confidence through practice"]),
-        "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the PlacementCare team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
+        "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the CareerPilot AI team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
     }
     page = pages.get(slug)
     if page is None:
@@ -440,6 +446,8 @@ def login():
 
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
+        if email in _configured_admin_emails():
+            return _begin_google_oauth(admin_email=email)
         if not email or not password:
             flash("Enter your email and password.", "warning")
             return render_template("login.html"), 400
@@ -462,14 +470,7 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/auth/google")
-def google_login():
-    if g.current_user is not None:
-        return redirect(url_for("dashboard"))
-    if _is_auth_rate_limited():
-        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
-        return redirect(url_for("login"))
-
+def _begin_google_oauth(admin_email=None):
     redirect_url = _auth_redirect_url()
     if not redirect_url:
         flash("Google sign-in is not configured for this deployment yet.", "warning")
@@ -484,7 +485,20 @@ def google_login():
 
     session["google_oauth_verifier"] = code_verifier
     session["google_oauth_started_at"] = int(time.time())
+    session.pop("google_admin_email", None)
+    if admin_email:
+        session["google_admin_email"] = admin_email
     return redirect(oauth_url)
+
+
+@app.route("/auth/google")
+def google_login():
+    if g.current_user is not None:
+        return redirect(url_for("admin_profile" if g.is_admin else "dashboard"))
+    if _is_auth_rate_limited():
+        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+        return redirect(url_for("login"))
+    return _begin_google_oauth()
 
 
 @app.route("/auth/callback")
@@ -492,12 +506,14 @@ def auth_callback():
     if request.args.get("error"):
         session.pop("google_oauth_verifier", None)
         session.pop("google_oauth_started_at", None)
+        session.pop("google_admin_email", None)
         flash("Google sign-in could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
 
     token_hash = request.args.get("token_hash", "").strip()
     token_type = request.args.get("type", "signup").strip()
     code = request.args.get("code", "").strip()
+    admin_email = None
 
     try:
         if token_hash:
@@ -510,6 +526,7 @@ def auth_callback():
                 token_type if token_type in allowed_types else "signup",
             )
         elif code:
+            admin_email = session.pop("google_admin_email", None)
             code_verifier = session.pop("google_oauth_verifier", None)
             started_at = session.pop("google_oauth_started_at", None)
             if code_verifier:
@@ -527,6 +544,7 @@ def auth_callback():
             flash("That confirmation link is invalid or expired.", "warning")
             return redirect(url_for("login"))
     except Exception:
+        session.pop("google_admin_email", None)
         current_app.logger.exception("Supabase authentication callback failed")
         flash("Sign-in could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
@@ -534,6 +552,17 @@ def auth_callback():
     if not result.session:
         flash("Please sign in to continue.", "info")
         return redirect(url_for("login"))
+
+    if admin_email:
+        authenticated_email = (
+            getattr(result.user, "email", "") or ""
+        ).strip().lower()
+        if authenticated_email != admin_email or not _user_is_admin(result.user):
+            flash("That Google account is not authorized for administrator access.", "danger")
+            return redirect(url_for("login"))
+        g.auth_session = result.session
+        flash("Welcome, administrator.", "success")
+        return redirect(url_for("admin_profile"))
 
     g.auth_session = result.session
     if token_type in {"invite", "recovery"}:
@@ -572,7 +601,7 @@ def admin_profile():
     return render_template(
         "admin.html",
         admin_email=getattr(g.current_user, "email", ""),
-        admin_name=metadata.get("display_name") or "PlacementCare Administrator",
+        admin_name=metadata.get("display_name") or "CareerPilot AI Administrator",
         accounts=accounts,
         account_count=len(accounts),
         verified_count=sum(1 for account in accounts if account.get("verified")),
@@ -636,7 +665,7 @@ def dashboard():
     display_name = (
         profile.get("display_name")
         or metadata.get("display_name")
-        or getattr(g.current_user, "email", "PlacementCare member").split("@")[0]
+        or getattr(g.current_user, "email", "CareerPilot AI member").split("@")[0]
     )
     progress = data.get("progress", [])
     return render_template(
@@ -859,7 +888,7 @@ def chatbot():
     return render_template(
         "chatbot.html",
         username=(getattr(g.current_user, "user_metadata", None) or {}).get(
-            "display_name", "PlacementCare member"
+            "display_name", "CareerPilot AI member"
         ),
     )
 
@@ -877,7 +906,7 @@ def chatbot_ask():
     message = message.strip()[:4000]
 
     prompt = (
-        "You are PlacementCare, a helpful career guidance assistant. "
+        "You are CareerPilot AI, a helpful career guidance assistant. "
         "Answer accurately and directly in no more than 5 concise bullet points "
         "or short sentences. For career advice, tailor recommendations to the "
         "user's question and use Markdown. If unrelated to careers, answer "

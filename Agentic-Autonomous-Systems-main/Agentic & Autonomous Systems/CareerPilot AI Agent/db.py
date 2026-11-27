@@ -219,7 +219,7 @@ def get_admin_user_directory():
                     "email": email,
                     "display_name": user_metadata.get("display_name")
                     or user_metadata.get("full_name")
-                    or (email.split("@", 1)[0] if email else "PlacementCare member"),
+                    or (email.split("@", 1)[0] if email else "CareerPilot AI member"),
                     "provider": provider or "email",
                     "verified": verified,
                     "role": "admin"
