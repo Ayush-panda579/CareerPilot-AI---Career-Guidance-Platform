@@ -57,6 +57,34 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result.session.expires_in, 1800)
         client.postgrest.auth.assert_called_once_with("access-token")
 
+    def test_google_sign_in_uses_supabase_oauth_provider(self):
+        auth = SimpleNamespace(
+            sign_in_with_oauth=Mock(
+                return_value=SimpleNamespace(url="https://auth.example/authorize")
+            )
+        )
+        client = SimpleNamespace(auth=auth)
+
+        with patch.object(db, "get_client", return_value=client):
+            url = db.sign_in_with_google(
+                "https://careerpilot.example/auth/callback?oauth_state=state",
+                "pkce-challenge",
+            )
+
+        self.assertEqual(url, "https://auth.example/authorize")
+        auth.sign_in_with_oauth.assert_called_once_with(
+            {
+                "provider": "google",
+                "options": {
+                    "redirect_to": "https://careerpilot.example/auth/callback?oauth_state=state",
+                    "query_params": {
+                        "code_challenge": "pkce-challenge",
+                        "code_challenge_method": "s256",
+                    },
+                },
+            }
+        )
+
     def test_sign_out_revokes_the_current_refresh_session(self):
         client = SimpleNamespace(
             auth=SimpleNamespace(set_session=Mock(), sign_out=Mock())
@@ -118,29 +146,6 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(context["session"].access_token, "renewed-access")
         self.assertEqual(context["session"].refresh_token, "renewed-refresh")
         client.postgrest.auth.assert_called_once_with("renewed-access")
-
-    def test_start_oauth_returns_url_and_pkce_verifier(self):
-        storage = Mock()
-        storage.get_item.return_value = "secure-pkce-verifier"
-        auth = SimpleNamespace(
-            sign_in_with_oauth=Mock(
-                return_value=SimpleNamespace(url="https://supabase.test/authorize")
-            ),
-            _storage=storage,
-            _storage_key="supabase.auth.token",
-        )
-        client = SimpleNamespace(auth=auth)
-        with patch.object(db, "get_client", return_value=client):
-            result = db.start_oauth("google", "https://app.test/auth/callback")
-
-        self.assertEqual(result, ("https://supabase.test/authorize", "secure-pkce-verifier"))
-        auth.sign_in_with_oauth.assert_called_once_with(
-            {
-                "provider": "google",
-                "options": {"redirect_to": "https://app.test/auth/callback"},
-            }
-        )
-        storage.get_item.assert_called_once_with("supabase.auth.token-code-verifier")
 
     def test_exchange_auth_code_uses_pkce_verifier(self):
         auth = SimpleNamespace(

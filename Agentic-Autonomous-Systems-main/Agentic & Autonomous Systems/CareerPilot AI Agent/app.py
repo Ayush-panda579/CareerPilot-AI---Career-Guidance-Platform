@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import os
@@ -9,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 from flask import (
@@ -165,11 +167,7 @@ def apply_security_headers(response):
 
 
 def _configured_admin_emails():
-    return {
-        address.strip().lower()
-        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
-        if address.strip()
-    }
+    return db.configured_admin_emails()
 
 
 def _user_is_admin(user):
@@ -182,27 +180,7 @@ def _user_is_admin(user):
         getattr(user, "email_confirmed_at", None)
         or getattr(user, "confirmed_at", None)
     )
-    if not email or email not in _configured_admin_emails() or not verified:
-        return False
-
-    providers = set()
-    if isinstance(app_metadata, dict):
-        provider = app_metadata.get("provider")
-        if isinstance(provider, str):
-            providers.add(provider.lower())
-        provider_list = app_metadata.get("providers") or []
-        if isinstance(provider_list, (list, tuple, set)):
-            providers.update(item.lower() for item in provider_list if isinstance(item, str))
-    identities = getattr(user, "identities", None) or []
-    for identity in identities:
-        provider = (
-            identity.get("provider")
-            if isinstance(identity, dict)
-            else getattr(identity, "provider", None)
-        )
-        if isinstance(provider, str):
-            providers.add(provider.lower())
-    return "google" in providers
+    return bool(email and email in _configured_admin_emails() and verified)
 
 
 def login_required(view):
@@ -434,6 +412,53 @@ def register():
     return render_template("register.html")
 
 
+@app.route("/auth/google")
+def google_login():
+    if g.current_user is not None:
+        return redirect(url_for("admin_profile" if g.is_admin else "dashboard"))
+
+    if _is_auth_rate_limited():
+        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+        return render_template("login.html"), 429
+
+    callback_url = _auth_redirect_url()
+    if not callback_url:
+        flash("Google sign-in is not configured for this deployment.", "danger")
+        return render_template("login.html"), 503
+
+    code_verifier = secrets.token_urlsafe(48)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    oauth_state = secrets.token_urlsafe(32)
+    session["google_oauth_state"] = oauth_state
+    session["google_oauth_verifier"] = code_verifier
+
+    callback_parts = urlsplit(callback_url)
+    callback_query = parse_qsl(callback_parts.query, keep_blank_values=True)
+    callback_query.append(("oauth_state", oauth_state))
+    redirect_to = urlunsplit(
+        (
+            callback_parts.scheme,
+            callback_parts.netloc,
+            callback_parts.path,
+            urlencode(callback_query),
+            callback_parts.fragment,
+        )
+    )
+
+    try:
+        oauth_url = db.sign_in_with_google(redirect_to, code_challenge)
+    except Exception:
+        session.pop("google_oauth_state", None)
+        session.pop("google_oauth_verifier", None)
+        current_app.logger.exception("Could not start Google sign-in")
+        flash("Google sign-in is unavailable right now. Please try again.", "warning")
+        return redirect(url_for("login"))
+
+    return redirect(oauth_url)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if g.current_user is not None:
@@ -446,8 +471,6 @@ def login():
 
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
-        if email in _configured_admin_emails():
-            return _begin_google_oauth(admin_email=email)
         if not email or not password:
             flash("Enter your email and password.", "warning")
             return render_template("login.html"), 400
@@ -464,56 +487,48 @@ def login():
             return redirect(url_for("login"))
 
         g.auth_session = result.session
+        if _user_is_admin(result.user):
+            flash("Welcome, administrator.", "success")
+            return redirect(url_for("admin_profile"))
         flash("Welcome back.", "success")
         return redirect(url_for("dashboard"))
 
     return render_template("login.html")
 
 
-def _begin_google_oauth(admin_email=None):
-    redirect_url = _auth_redirect_url()
-    if not redirect_url:
-        flash("Google sign-in is not configured for this deployment yet.", "warning")
-        return redirect(url_for("login"))
-
-    try:
-        oauth_url, code_verifier = db.start_oauth("google", redirect_url)
-    except Exception:
-        current_app.logger.exception("Could not start Google sign-in")
-        flash("Google sign-in is unavailable right now. Please try again later.", "warning")
-        return redirect(url_for("login"))
-
-    session["google_oauth_verifier"] = code_verifier
-    session["google_oauth_started_at"] = int(time.time())
-    session.pop("google_admin_email", None)
-    if admin_email:
-        session["google_admin_email"] = admin_email
-    return redirect(oauth_url)
-
-
-@app.route("/auth/google")
-def google_login():
-    if g.current_user is not None:
-        return redirect(url_for("admin_profile" if g.is_admin else "dashboard"))
-    if _is_auth_rate_limited():
-        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
-        return redirect(url_for("login"))
-    return _begin_google_oauth()
-
-
 @app.route("/auth/callback")
 def auth_callback():
     if request.args.get("error"):
+        session.pop("google_oauth_state", None)
         session.pop("google_oauth_verifier", None)
-        session.pop("google_oauth_started_at", None)
-        session.pop("google_admin_email", None)
-        flash("Google sign-in could not be completed. Please try again.", "warning")
+        flash("Authentication could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
 
     token_hash = request.args.get("token_hash", "").strip()
     token_type = request.args.get("type", "signup").strip()
     code = request.args.get("code", "").strip()
-    admin_email = None
+    has_google_state = "oauth_state" in request.args
+    code_verifier = None
+
+    if has_google_state:
+        expected_state = session.pop("google_oauth_state", "")
+        code_verifier = session.pop("google_oauth_verifier", "")
+        returned_state = request.args.get("oauth_state", "")
+        if (
+            not isinstance(expected_state, str)
+            or not isinstance(code_verifier, str)
+            or not expected_state
+            or not code_verifier
+            or not hmac.compare_digest(expected_state, returned_state)
+            or not code
+        ):
+            flash("Google sign-in could not be verified. Please try again.", "warning")
+            return redirect(url_for("login"))
+    elif session.get("google_oauth_state"):
+        session.pop("google_oauth_state", None)
+        session.pop("google_oauth_verifier", None)
+        flash("Google sign-in could not be verified. Please try again.", "warning")
+        return redirect(url_for("login"))
 
     try:
         if token_hash:
@@ -526,25 +541,15 @@ def auth_callback():
                 token_type if token_type in allowed_types else "signup",
             )
         elif code:
-            admin_email = session.pop("google_admin_email", None)
-            code_verifier = session.pop("google_oauth_verifier", None)
-            started_at = session.pop("google_oauth_started_at", None)
-            if code_verifier:
-                try:
-                    is_expired = not started_at or time.time() - int(started_at) > 600
-                except (TypeError, ValueError):
-                    is_expired = True
-                if is_expired:
-                    flash("That Google sign-in link expired. Please try again.", "warning")
-                    return redirect(url_for("login"))
-                result = db.exchange_auth_code(code, code_verifier)
-            else:
-                result = db.exchange_auth_code(code)
+            result = (
+                db.exchange_auth_code(code, code_verifier)
+                if code_verifier
+                else db.exchange_auth_code(code)
+            )
         else:
             flash("That confirmation link is invalid or expired.", "warning")
             return redirect(url_for("login"))
     except Exception:
-        session.pop("google_admin_email", None)
         current_app.logger.exception("Supabase authentication callback failed")
         flash("Sign-in could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
@@ -553,21 +558,13 @@ def auth_callback():
         flash("Please sign in to continue.", "info")
         return redirect(url_for("login"))
 
-    if admin_email:
-        authenticated_email = (
-            getattr(result.user, "email", "") or ""
-        ).strip().lower()
-        if authenticated_email != admin_email or not _user_is_admin(result.user):
-            flash("That Google account is not authorized for administrator access.", "danger")
-            return redirect(url_for("login"))
-        g.auth_session = result.session
-        flash("Welcome, administrator.", "success")
-        return redirect(url_for("admin_profile"))
-
     g.auth_session = result.session
     if token_type in {"invite", "recovery"}:
         flash("Your email link is confirmed. Set a password to continue.", "success")
         return redirect(url_for("set_password"))
+    if _user_is_admin(result.user):
+        flash("Welcome, administrator.", "success")
+        return redirect(url_for("admin_profile"))
     flash("You are signed in. Your account is ready.", "success")
     return redirect(url_for("dashboard"))
 
