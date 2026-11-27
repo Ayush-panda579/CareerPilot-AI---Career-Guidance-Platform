@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin profile | PlacementCare{% endblock %}
+
+{% block extra_css %}
+<style>
+    .admin-page { min-height: 62vh; padding: clamp(2rem, 6vw, 5rem) 0; background: linear-gradient(180deg, #f3f6fc 0%, #fff 100%); }
+    .admin-card { max-width: 760px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 1.4rem; background: #fff; box-shadow: 0 18px 52px rgba(19, 40, 72, .08); overflow: hidden; }
+    .admin-card-header { padding: clamp(1.5rem, 4vw, 2.5rem); color: #fff; background: linear-gradient(125deg, #142641, #334b72); }
+    .admin-card-body { padding: clamp(1.5rem, 4vw, 2.5rem); }
+    .admin-avatar { display: grid; place-items: center; width: 3.5rem; height: 3.5rem; border-radius: 1.1rem; background: rgba(255,255,255,.14); font-size: 1.4rem; }
+    .profile-label { color: #64748b; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .profile-value { color: #142641; font-weight: 650; overflow-wrap: anywhere; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<main class="admin-page">
+    <div class="container px-3">
+        <section class="admin-card" aria-labelledby="admin-title">
+            <div class="admin-card-header d-flex align-items-center gap-3">
+                <div class="admin-avatar" aria-hidden="true"><i class="bi bi-shield-lock"></i></div>
+                <div>
+                    <p class="text-white-50 text-uppercase small fw-semibold mb-1">PlacementCare account</p>
+                    <h1 class="h3 mb-0" id="admin-title">Administrator profile</h1>
+                </div>
+            </div>
+            <div class="admin-card-body">
+                <p class="text-secondary mb-4">Admin access is enabled for this verified account.</p>
+                <dl class="row gy-3 mb-4">
+                    <div class="col-12 col-sm-4"><dt class="profile-label">Profile name</dt></div>
+                    <div class="col-12 col-sm-8"><dd class="profile-value mb-0">{{ admin_name }}</dd></div>
+                    <div class="col-12 col-sm-4"><dt class="profile-label">Username</dt></div>
+                    <div class="col-12 col-sm-8"><dd class="profile-value mb-0">{{ admin_email }}</dd></div>
+                    <div class="col-12 col-sm-4"><dt class="profile-label">Access</dt></div>
+                    <div class="col-12 col-sm-8"><dd class="mb-0"><span class="badge rounded-pill text-bg-success">Administrator</span></dd></div>
+                </dl>
+                <div class="d-flex flex-wrap gap-2">
+                    <a class="btn btn-primary" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2 me-1" aria-hidden="true"></i>Open workspace</a>
+                    <a class="btn btn-outline-secondary" href="{{ url_for('set_password') }}"><i class="bi bi-key me-1" aria-hidden="true"></i>Change password</a>
+                </div>
+            </div>
+        </section>
+    </div>
+</main>
+{% endblock %}

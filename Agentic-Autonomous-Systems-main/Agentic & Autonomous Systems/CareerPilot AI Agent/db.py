@@ -107,6 +107,13 @@ def sign_out(access_token, refresh_token):
     client.auth.sign_out()
 
 
+def update_password(client, access_token, refresh_token, password):
+    if not access_token or not refresh_token:
+        raise RuntimeError("An active account session is required to change the password.")
+    client.auth.set_session(access_token, refresh_token)
+    return client.auth.update_user({"password": password})
+
+
 def verify_email_token(token_hash, token_type):
     client = get_client()
     response = client.auth.verify_otp(

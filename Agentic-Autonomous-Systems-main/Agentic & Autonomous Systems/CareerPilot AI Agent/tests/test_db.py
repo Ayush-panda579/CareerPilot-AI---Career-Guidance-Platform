@@ -66,6 +66,16 @@ class DatabaseTests(unittest.TestCase):
         client.auth.set_session.assert_called_once_with("access-token", "refresh-token")
         client.auth.sign_out.assert_called_once_with()
 
+    def test_update_password_uses_authenticated_session(self):
+        client = SimpleNamespace(
+            auth=SimpleNamespace(set_session=Mock(), update_user=Mock(return_value="updated"))
+        )
+        result = db.update_password(client, "access-token", "refresh-token", "new-password")
+
+        self.assertEqual(result, "updated")
+        client.auth.set_session.assert_called_once_with("access-token", "refresh-token")
+        client.auth.update_user.assert_called_once_with({"password": "new-password"})
+
     def test_authentication_scopes_postgrest_client_to_access_token(self):
         user = SimpleNamespace(id="user-id", email="user@example.test")
         client = SimpleNamespace(
