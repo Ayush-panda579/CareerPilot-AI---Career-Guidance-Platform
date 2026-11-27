@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Admin overview | PlacementCare{% endblock %}
+{% block title %}Admin overview | CareerPilot AI{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -50,7 +50,7 @@
     <div class="container">
         <header class="admin-hero" aria-labelledby="admin-title">
             <div class="admin-hero-copy">
-                <p class="admin-hero-kicker mb-0">PlacementCare · Admin workspace</p>
+                <p class="admin-hero-kicker mb-0">CareerPilot AI · Admin workspace</p>
                 <h1 id="admin-title">Platform overview</h1>
                 <p>Welcome, {{ admin_name }}. Review account health, recent access, and the tools available across the platform.</p>
                 <div class="admin-actions">
@@ -89,7 +89,7 @@
 
             <div class="table-responsive">
                 <table class="table account-table align-middle">
-                    <caption class="visually-hidden">PlacementCare user accounts and authentication status</caption>
+                    <caption class="visually-hidden">CareerPilot AI user accounts and authentication status</caption>
                     <thead><tr><th scope="col">Account</th><th scope="col">Provider</th><th scope="col">Email status</th><th scope="col">Access</th><th scope="col">Joined</th><th scope="col">Last sign-in</th></tr></thead>
                     <tbody id="account-table-body">
                         {% for account in accounts %}
@@ -112,7 +112,7 @@
         </section>
 
         <section class="admin-panel" aria-labelledby="features-title">
-            <div class="panel-heading"><div><h2 id="features-title">Platform tools</h2><p>Quick access to the PlacementCare user experience.</p></div></div>
+            <div class="panel-heading"><div><h2 id="features-title">Platform tools</h2><p>Quick access to the CareerPilot AI user experience.</p></div></div>
             <nav class="feature-shortcuts" aria-label="Platform feature shortcuts">
                 <a class="feature-shortcut" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2" aria-hidden="true"></i>Career dashboard</a>
                 <a class="feature-shortcut" href="{{ url_for('roadmap') }}"><i class="bi bi-signpost-split" aria-hidden="true"></i>Career roadmap</a>

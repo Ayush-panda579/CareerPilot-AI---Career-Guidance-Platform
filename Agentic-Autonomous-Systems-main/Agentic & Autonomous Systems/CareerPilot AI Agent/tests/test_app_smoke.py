@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import importlib.util
 import io
 import json
@@ -8,6 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +25,7 @@ os.environ.update(
         "VERCEL": "",
         "SECRET_KEY": "test-only-secret",
         "SUPABASE_JWT_SECRET": "",
+        "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "",
         "GEMINI_API_KEY": "",
     }
 )
@@ -38,6 +42,8 @@ app_module.app.config.update(
 
 class FlaskSmokeTests(unittest.TestCase):
     def setUp(self):
+        with app_module._AUTH_ATTEMPTS_LOCK:
+            app_module._AUTH_ATTEMPTS.clear()
         self.client = app_module.app.test_client()
         self.user = SimpleNamespace(
             id="a4a4d19e-a75e-4df6-9873-161f2b457ceb",
@@ -59,8 +65,8 @@ class FlaskSmokeTests(unittest.TestCase):
             patch.object(db, "sign_in", return_value=self.auth_result),
             patch.object(
                 db,
-                "start_oauth",
-                return_value=("https://accounts.google.com/o/oauth2/v2/auth", "pkce-test-verifier"),
+                "sign_in_with_google",
+                return_value="https://example.supabase.co/auth/v1/authorize?provider=google",
             ),
             patch.object(db, "exchange_auth_code", return_value=self.auth_result),
             patch.object(db, "get_admin_user_directory", return_value={
@@ -383,17 +389,77 @@ class FlaskSmokeTests(unittest.TestCase):
         self.assertNotIn(b"test-password", response.data)
         db.get_admin_user_directory.assert_called_once_with()
 
-    def test_google_allowlist_requires_a_verified_google_identity(self):
+    def test_allowlist_accepts_verified_email_identity(self):
         self.user.email = "admin@placementcare.in"
         self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
-        self.user.app_metadata = {"provider": "google", "providers": ["google"]}
+        self.user.app_metadata = {"provider": "email", "providers": ["email"]}
         with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": "admin@placementcare.in"}):
             self.assertTrue(app_module._user_is_admin(self.user))
             self.user.email_confirmed_at = None
             self.assertFalse(app_module._user_is_admin(self.user))
-            self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
-            self.user.app_metadata = {"provider": "email", "providers": ["email"]}
-            self.assertFalse(app_module._user_is_admin(self.user))
+
+    def test_requested_google_admin_address_is_allowlisted_when_verified(self):
+        self.user.email = "pandaayush141@gmail.com"
+        self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+        self.user.app_metadata = {"provider": "google", "providers": ["google"]}
+
+        self.assertTrue(app_module._user_is_admin(self.user))
+
+    def test_google_login_creates_state_and_pkce_challenge(self):
+        response = self.client.get("/auth/google")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.location,
+            "https://example.supabase.co/auth/v1/authorize?provider=google",
+        )
+        redirect_to, challenge = db.sign_in_with_google.call_args.args
+        callback_parts = urlsplit(redirect_to)
+        callback_query = parse_qs(callback_parts.query)
+        self.assertEqual(callback_parts.path, "/auth/callback")
+
+        state = callback_query["oauth_state"][0]
+        with self.client.session_transaction() as browser_session:
+            verifier = browser_session["google_oauth_verifier"]
+            self.assertEqual(browser_session["google_oauth_state"], state)
+
+        expected_challenge = base64.urlsafe_b64encode(
+            hashlib.sha256(verifier.encode("ascii")).digest()
+        ).rstrip(b"=").decode("ascii")
+        self.assertEqual(challenge, expected_challenge)
+
+    def test_google_callback_exchanges_pkce_and_routes_allowlisted_admin(self):
+        self.user.email = "pandaayush141@gmail.com"
+        self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+        with self.client.session_transaction() as browser_session:
+            browser_session["google_oauth_state"] = "expected-state"
+            browser_session["google_oauth_verifier"] = "saved-verifier"
+
+        response = self.client.get(
+            "/auth/callback",
+            query_string={"code": "google-code", "oauth_state": "expected-state"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/admin")
+        db.exchange_auth_code.assert_called_once_with("google-code", "saved-verifier")
+        with self.client.session_transaction() as browser_session:
+            self.assertNotIn("google_oauth_state", browser_session)
+            self.assertNotIn("google_oauth_verifier", browser_session)
+
+    def test_google_callback_rejects_mismatched_state(self):
+        with self.client.session_transaction() as browser_session:
+            browser_session["google_oauth_state"] = "expected-state"
+            browser_session["google_oauth_verifier"] = "saved-verifier"
+
+        response = self.client.get(
+            "/auth/callback",
+            query_string={"code": "google-code", "oauth_state": "wrong-state"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/login")
+        db.exchange_auth_code.assert_not_called()
 
     def test_auth_redirect_uses_production_domain_on_vercel(self):
         with patch.object(app_module, "IS_VERCEL", True), patch.dict(
@@ -451,23 +517,42 @@ class FlaskSmokeTests(unittest.TestCase):
         ):
             self.assertIsNone(app_module._auth_redirect_url())
 
-    def test_google_sign_in_round_trips_pkce_verifier(self):
-        start = self.client.get("/auth/google")
-        self.assertEqual(start.status_code, 302)
-        self.assertEqual(
-            start.headers["Location"],
-            "https://accounts.google.com/o/oauth2/v2/auth",
-        )
+    def test_google_sign_in_entry_points_are_available(self):
+        response = self.client.get("/auth/google")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("provider=google", response.location)
+        self.assertIn(b"Continue with Google", self.client.get("/login").data)
+        self.assertNotIn(b"Continue with Google", self.client.get("/register").data)
 
-        callback = self.client.get("/auth/callback?code=google-auth-code")
-        self.assertEqual(callback.status_code, 302)
-        self.assertEqual(callback.headers["Location"], "/dashboard")
-        db.start_oauth.assert_called_once_with(
-            "google", "http://localhost/auth/callback"
-        )
-        db.exchange_auth_code.assert_called_once_with(
-            "google-auth-code", "pkce-test-verifier"
-        )
+    def test_requested_admin_can_sign_in_with_verified_email_and_password(self):
+        self.user.email = "pandaayush141@gmail.com"
+        self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+        self.user.app_metadata = {"provider": "email", "providers": ["email"]}
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": ""}):
+            response = self.client.post(
+                "/login",
+                data={"email": "PandaAyush141@gmail.com", "password": "test-password"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/admin")
+        db.sign_in.assert_called_once_with("pandaayush141@gmail.com", "test-password")
+        self.assertIn("careerpilot_access=", response.headers.get("Set-Cookie", ""))
+
+    def test_admin_allowlist_requires_a_verified_email(self):
+        self.user.email = "pandaayush141@gmail.com"
+        self.user.email_confirmed_at = None
+        self.user.confirmed_at = None
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": ""}):
+            self.assertFalse(app_module._user_is_admin(self.user))
+            self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+            self.assertTrue(app_module._user_is_admin(self.user))
+
+    def test_supabase_code_callback_uses_code_exchange(self):
+        response = self.client.get("/auth/callback?code=supabase-code")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/dashboard")
+        db.exchange_auth_code.assert_called_once_with("supabase-code")
 
     def test_invitation_confirmation_redirects_to_password_setup(self):
         response = self.client.get(

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Sign in | PlacementCare{% endblock %}
+{% block title %}Sign in | CareerPilot AI{% endblock %}
 
 {% block extra_css %}
     .auth-page { min-height: 76vh; display: flex; align-items: center; justify-content: center; padding: clamp(1.5rem, 5vw, 4rem) 1rem; background: radial-gradient(ellipse at 14% 16%, rgba(96,165,250,.13), transparent 34%), #f7f8fc; }
@@ -28,18 +28,15 @@
     .auth-form-content .form-control { min-height: 49px; border-color: #e1e4ec; border-radius: 11px; background: #fff; font-size: .9rem; }
     .auth-form-content .form-control:focus { border-color: #6657c8; box-shadow: 0 0 0 .2rem rgba(102,87,200,.13); }
     .auth-submit { min-height: 49px; margin-top: .25rem; border-radius: 11px; font-size: .9rem; font-weight: 650; }
-    .auth-divider { display:flex; align-items:center; gap:.85rem; margin:1.25rem 0; color:#8b92a0; font-size:.78rem; }
-    .auth-divider::before,.auth-divider::after { content:""; height:1px; flex:1; background:#e8eaf0; }
-    .google-auth-button { display:flex; justify-content:center; align-items:center; gap:.65rem; min-height:48px; border:1px solid #e1e4ec; border-radius:11px; background:#fff; color:#303544; font-size:.87rem; font-weight:600; text-decoration:none; transition:background .2s ease,border-color .2s ease,transform .2s ease; }
-    .google-auth-button:hover { color:#202124; border-color:#c7cbd5; background:#fafbff; transform:translateY(-1px); }
-    .google-auth-button i { color:#4285f4; font-size:1rem; }
-    .auth-provider-note { color:#818797; font-size:.72rem; line-height:1.55; }
+    .auth-divider { display:flex; align-items:center; gap:.75rem; margin:1.1rem 0 0; color:#8a90a0; font-size:.73rem; }
+    .auth-divider::before, .auth-divider::after { content:""; flex:1; height:1px; background:#e8eaf0; }
+    .google-signin { display:flex; align-items:center; justify-content:center; gap:.65rem; min-height:49px; margin-top:.8rem; border:1px solid #d8dce5; border-radius:11px; color:#30384c; font-size:.9rem; font-weight:650; }
+    .google-signin:hover, .google-signin:focus-visible { border-color:#aeb4c2; background:#f8f9fc; color:#18213c; }
     .auth-switch { margin:1.5rem 0 0; color:#737989; font-size:.83rem; text-align:center; }
     .auth-switch a { color:#5445b1; font-weight:700; text-decoration:none; }
     .auth-switch a:hover { text-decoration:underline; }
     @media (max-width: 760px) { .auth-shell { max-width: 560px; grid-template-columns: 1fr; } .auth-art { min-height: 280px; padding: 1.4rem 1.5rem; } .auth-art::before { background-position: center 40%; } .auth-art-copy { margin-top: 3rem; } .auth-art h2 { font-size: 2rem; } .auth-art-copy > p { max-width: 420px; font-size: .85rem; } .auth-path { margin-top: 1rem; } .auth-path-step { font-size: .65rem; } .auth-path-line { width: 18px; } .auth-art-foot { display:none; } .auth-form-panel { padding: 2rem 1.5rem 2.25rem; } }
     @media (max-width: 380px) { .auth-art { min-height: 250px; } .auth-path { gap: .35rem; } .auth-path-step { gap: .3rem; font-size: .59rem; } .auth-path-step i { width: 22px; height: 22px; } }
-    @media (prefers-reduced-motion: reduce) { .google-auth-button { transition: none; } }
     .auth-page { min-height: calc(100vh - 110px); padding-block: 2rem; }
     .auth-shell { width: min(100%, 520px); grid-template-columns: 1fr; border-radius: 22px; }
     .auth-art { display: none; }
@@ -48,9 +45,9 @@
 
 {% block content %}
 <main class="auth-page">
-    <section class="auth-shell" aria-label="PlacementCare sign in">
+    <section class="auth-shell" aria-label="CareerPilot AI sign in">
         <aside class="auth-art" aria-label="A visual career journey with milestones for exploring, learning, and growing">
-            <div class="auth-brand"><span class="auth-brand-mark"><i class="bi bi-compass" aria-hidden="true"></i></span><span>PlacementCare</span></div>
+            <div class="auth-brand"><span class="auth-brand-mark"><i class="bi bi-compass" aria-hidden="true"></i></span><span>CareerPilot AI</span></div>
             <div class="auth-art-copy">
                 <p class="auth-art-eyebrow"><i class="bi bi-stars" aria-hidden="true"></i> Your next chapter</p>
                 <h2>Find your direction. Make it yours.</h2>
@@ -67,7 +64,7 @@
             <div class="auth-form-content">
                 <p class="auth-kicker">Welcome back</p>
                 <h1 id="sign-in-title">Good to see you.</h1>
-                <p class="auth-intro">Sign in to continue your career plan and pick up where you left off.</p>
+                <p class="auth-intro">Sign in with your email and password, or continue securely with Google. Administrator access is limited to authorized, verified email addresses.</p>
 
                 <form method="post" action="{{ url_for('login') }}" aria-labelledby="sign-in-title">
                     <div class="mb-3">
@@ -78,17 +75,13 @@
                         <label class="form-label" for="password">Password</label>
                         <input class="form-control" id="password" type="password" name="password" autocomplete="current-password" required>
                     </div>
-                    <button class="btn btn-gradient auth-submit w-100" type="submit">Sign in <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i></button>
+                    <button class="btn btn-gradient auth-submit w-100" type="submit">Continue <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i></button>
                 </form>
 
-                <div class="auth-divider" aria-hidden="true">or continue with</div>
-                <a class="google-auth-button" href="{{ url_for('google_login') }}">
-                    <i class="bi bi-google" aria-hidden="true"></i>
-                    <span>Continue with Google</span>
-                </a>
-                <p class="auth-provider-note text-center mt-2 mb-0">Administrators must use a verified, pre-authorized Google account.</p>
+                <div class="auth-divider" aria-hidden="true">or</div>
+                <a class="btn google-signin w-100" href="{{ url_for('google_login') }}"><i class="bi bi-google" aria-hidden="true"></i><span>Continue with Google</span></a>
 
-                <p class="auth-switch">New to PlacementCare? <a href="{{ url_for('register') }}">Create an account <span aria-hidden="true">→</span></a></p>
+                <p class="auth-switch">New to CareerPilot AI? <a href="{{ url_for('register') }}">Create an account <span aria-hidden="true">→</span></a></p>
             </div>
         </div>
     </section>

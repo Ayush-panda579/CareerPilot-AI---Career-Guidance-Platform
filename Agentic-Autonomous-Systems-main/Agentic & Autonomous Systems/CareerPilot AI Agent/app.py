@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import os
@@ -9,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from dotenv import load_dotenv
 from flask import (
@@ -27,6 +29,9 @@ from werkzeug.utils import secure_filename
 
 APP_ROOT = Path(__file__).resolve().parent
 load_dotenv(APP_ROOT / ".env")
+load_dotenv(APP_ROOT / ".env.development.local")
+for parent in APP_ROOT.parents:
+    load_dotenv(parent / ".env.development.local")
 
 import db
 from services.storage_service import (
@@ -161,6 +166,10 @@ def apply_security_headers(response):
     return response
 
 
+def _configured_admin_emails():
+    return db.configured_admin_emails()
+
+
 def _user_is_admin(user):
     app_metadata = getattr(user, "app_metadata", None) or {}
     if isinstance(app_metadata, dict) and app_metadata.get("role") == "admin":
@@ -171,32 +180,7 @@ def _user_is_admin(user):
         getattr(user, "email_confirmed_at", None)
         or getattr(user, "confirmed_at", None)
     )
-    allowed_admins = {
-        address.strip().lower()
-        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
-        if address.strip()
-    }
-    if not email or email not in allowed_admins or not verified:
-        return False
-
-    providers = set()
-    if isinstance(app_metadata, dict):
-        provider = app_metadata.get("provider")
-        if isinstance(provider, str):
-            providers.add(provider.lower())
-        provider_list = app_metadata.get("providers") or []
-        if isinstance(provider_list, (list, tuple, set)):
-            providers.update(item.lower() for item in provider_list if isinstance(item, str))
-    identities = getattr(user, "identities", None) or []
-    for identity in identities:
-        provider = (
-            identity.get("provider")
-            if isinstance(identity, dict)
-            else getattr(identity, "provider", None)
-        )
-        if isinstance(provider, str):
-            providers.add(provider.lower())
-    return "google" in providers
+    return bool(email and email in _configured_admin_emails() and verified)
 
 
 def login_required(view):
@@ -334,10 +318,10 @@ def content_page(slug):
         "skill-extractor": ("Skill Extractor", "Make your strengths easier to see. Start with your resume and build a clearer picture of the skills you can bring to your next role.", "upload", "Upload a resume", ["Surface core strengths", "Spot skills to develop", "Connect skills to career paths"]),
         "ai-mentor": ("AI Mentor", "Get thoughtful support for career decisions, interview practice, and your next professional move.", "chatbot", "Talk to your mentor", ["Career questions, answered", "Interview practice prompts", "Practical next steps"]),
         "job-matcher": ("Job Matcher", "Explore career directions that align with your interests and strengths. Start with the career paths library and use your roadmap to plan what comes next.", "careers", "Explore career paths", ["Browse role families", "Understand common skills", "Build a personal learning plan"]),
-        "blog": ("The PlacementCare journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
+        "blog": ("The CareerPilot AI journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
         "learning-hub": ("Learning hub", "Turn a big goal into small, trackable steps. Your learning plan is saved to your account and updates live across sessions.", "dashboard", "Open your dashboard", ["Create learning goals", "Track completed milestones", "See progress update in real time"]),
         "interview-prep": ("Interview prep", "Practice the moments that matter, from your opening story to the questions you want to ask.", "chatbot", "Practice with your AI mentor", ["Structure concise answers", "Prepare thoughtful questions", "Build confidence through practice"]),
-        "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the PlacementCare team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
+        "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the CareerPilot AI team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
     }
     page = pages.get(slug)
     if page is None:
@@ -428,6 +412,53 @@ def register():
     return render_template("register.html")
 
 
+@app.route("/auth/google")
+def google_login():
+    if g.current_user is not None:
+        return redirect(url_for("admin_profile" if g.is_admin else "dashboard"))
+
+    if _is_auth_rate_limited():
+        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+        return render_template("login.html"), 429
+
+    callback_url = _auth_redirect_url()
+    if not callback_url:
+        flash("Google sign-in is not configured for this deployment.", "danger")
+        return render_template("login.html"), 503
+
+    code_verifier = secrets.token_urlsafe(48)
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode("ascii")).digest()
+    ).rstrip(b"=").decode("ascii")
+    oauth_state = secrets.token_urlsafe(32)
+    session["google_oauth_state"] = oauth_state
+    session["google_oauth_verifier"] = code_verifier
+
+    callback_parts = urlsplit(callback_url)
+    callback_query = parse_qsl(callback_parts.query, keep_blank_values=True)
+    callback_query.append(("oauth_state", oauth_state))
+    redirect_to = urlunsplit(
+        (
+            callback_parts.scheme,
+            callback_parts.netloc,
+            callback_parts.path,
+            urlencode(callback_query),
+            callback_parts.fragment,
+        )
+    )
+
+    try:
+        oauth_url = db.sign_in_with_google(redirect_to, code_challenge)
+    except Exception:
+        session.pop("google_oauth_state", None)
+        session.pop("google_oauth_verifier", None)
+        current_app.logger.exception("Could not start Google sign-in")
+        flash("Google sign-in is unavailable right now. Please try again.", "warning")
+        return redirect(url_for("login"))
+
+    return redirect(oauth_url)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if g.current_user is not None:
@@ -456,48 +487,48 @@ def login():
             return redirect(url_for("login"))
 
         g.auth_session = result.session
+        if _user_is_admin(result.user):
+            flash("Welcome, administrator.", "success")
+            return redirect(url_for("admin_profile"))
         flash("Welcome back.", "success")
         return redirect(url_for("dashboard"))
 
     return render_template("login.html")
 
 
-@app.route("/auth/google")
-def google_login():
-    if g.current_user is not None:
-        return redirect(url_for("dashboard"))
-    if _is_auth_rate_limited():
-        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
-        return redirect(url_for("login"))
-
-    redirect_url = _auth_redirect_url()
-    if not redirect_url:
-        flash("Google sign-in is not configured for this deployment yet.", "warning")
-        return redirect(url_for("login"))
-
-    try:
-        oauth_url, code_verifier = db.start_oauth("google", redirect_url)
-    except Exception:
-        current_app.logger.exception("Could not start Google sign-in")
-        flash("Google sign-in is unavailable right now. Please try again later.", "warning")
-        return redirect(url_for("login"))
-
-    session["google_oauth_verifier"] = code_verifier
-    session["google_oauth_started_at"] = int(time.time())
-    return redirect(oauth_url)
-
-
 @app.route("/auth/callback")
 def auth_callback():
     if request.args.get("error"):
+        session.pop("google_oauth_state", None)
         session.pop("google_oauth_verifier", None)
-        session.pop("google_oauth_started_at", None)
-        flash("Google sign-in could not be completed. Please try again.", "warning")
+        flash("Authentication could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
 
     token_hash = request.args.get("token_hash", "").strip()
     token_type = request.args.get("type", "signup").strip()
     code = request.args.get("code", "").strip()
+    has_google_state = "oauth_state" in request.args
+    code_verifier = None
+
+    if has_google_state:
+        expected_state = session.pop("google_oauth_state", "")
+        code_verifier = session.pop("google_oauth_verifier", "")
+        returned_state = request.args.get("oauth_state", "")
+        if (
+            not isinstance(expected_state, str)
+            or not isinstance(code_verifier, str)
+            or not expected_state
+            or not code_verifier
+            or not hmac.compare_digest(expected_state, returned_state)
+            or not code
+        ):
+            flash("Google sign-in could not be verified. Please try again.", "warning")
+            return redirect(url_for("login"))
+    elif session.get("google_oauth_state"):
+        session.pop("google_oauth_state", None)
+        session.pop("google_oauth_verifier", None)
+        flash("Google sign-in could not be verified. Please try again.", "warning")
+        return redirect(url_for("login"))
 
     try:
         if token_hash:
@@ -510,19 +541,11 @@ def auth_callback():
                 token_type if token_type in allowed_types else "signup",
             )
         elif code:
-            code_verifier = session.pop("google_oauth_verifier", None)
-            started_at = session.pop("google_oauth_started_at", None)
-            if code_verifier:
-                try:
-                    is_expired = not started_at or time.time() - int(started_at) > 600
-                except (TypeError, ValueError):
-                    is_expired = True
-                if is_expired:
-                    flash("That Google sign-in link expired. Please try again.", "warning")
-                    return redirect(url_for("login"))
-                result = db.exchange_auth_code(code, code_verifier)
-            else:
-                result = db.exchange_auth_code(code)
+            result = (
+                db.exchange_auth_code(code, code_verifier)
+                if code_verifier
+                else db.exchange_auth_code(code)
+            )
         else:
             flash("That confirmation link is invalid or expired.", "warning")
             return redirect(url_for("login"))
@@ -539,6 +562,9 @@ def auth_callback():
     if token_type in {"invite", "recovery"}:
         flash("Your email link is confirmed. Set a password to continue.", "success")
         return redirect(url_for("set_password"))
+    if _user_is_admin(result.user):
+        flash("Welcome, administrator.", "success")
+        return redirect(url_for("admin_profile"))
     flash("You are signed in. Your account is ready.", "success")
     return redirect(url_for("dashboard"))
 
@@ -572,7 +598,7 @@ def admin_profile():
     return render_template(
         "admin.html",
         admin_email=getattr(g.current_user, "email", ""),
-        admin_name=metadata.get("display_name") or "PlacementCare Administrator",
+        admin_name=metadata.get("display_name") or "CareerPilot AI Administrator",
         accounts=accounts,
         account_count=len(accounts),
         verified_count=sum(1 for account in accounts if account.get("verified")),
@@ -636,7 +662,7 @@ def dashboard():
     display_name = (
         profile.get("display_name")
         or metadata.get("display_name")
-        or getattr(g.current_user, "email", "PlacementCare member").split("@")[0]
+        or getattr(g.current_user, "email", "CareerPilot AI member").split("@")[0]
     )
     progress = data.get("progress", [])
     return render_template(
@@ -859,7 +885,7 @@ def chatbot():
     return render_template(
         "chatbot.html",
         username=(getattr(g.current_user, "user_metadata", None) or {}).get(
-            "display_name", "PlacementCare member"
+            "display_name", "CareerPilot AI member"
         ),
     )
 
@@ -877,7 +903,7 @@ def chatbot_ask():
     message = message.strip()[:4000]
 
     prompt = (
-        "You are PlacementCare, a helpful career guidance assistant. "
+        "You are CareerPilot AI, a helpful career guidance assistant. "
         "Answer accurately and directly in no more than 5 concise bullet points "
         "or short sentences. For career advice, tailor recommendations to the "
         "user's question and use Markdown. If unrelated to careers, answer "

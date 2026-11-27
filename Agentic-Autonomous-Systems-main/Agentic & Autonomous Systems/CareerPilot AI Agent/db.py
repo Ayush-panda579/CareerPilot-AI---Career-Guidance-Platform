@@ -32,6 +32,18 @@ class AuthResult:
     session: AuthSession | None
 
 
+_DEFAULT_ADMIN_EMAILS = frozenset({"pandaayush141@gmail.com"})
+
+
+def configured_admin_emails():
+    configured = {
+        address.strip().lower()
+        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
+        if address.strip()
+    }
+    return configured | _DEFAULT_ADMIN_EMAILS
+
+
 def get_client(access_token=None):
     if create_client is None:
         raise SupabaseConfigurationError("Install the Supabase Python SDK.")
@@ -103,6 +115,23 @@ def sign_in(email, password):
     return result
 
 
+def sign_in_with_google(redirect_to, code_challenge):
+    client = get_client()
+    response = client.auth.sign_in_with_oauth(
+        {
+            "provider": "google",
+            "options": {
+                "redirect_to": redirect_to,
+                "query_params": {
+                    "code_challenge": code_challenge,
+                    "code_challenge_method": "s256",
+                },
+            },
+        }
+    )
+    return response.url
+
+
 def sign_out(access_token, refresh_token):
     client = get_client()
     if access_token and refresh_token:
@@ -125,28 +154,6 @@ def verify_email_token(token_hash, token_type):
     return _auth_result(response)
 
 
-def start_oauth(provider, redirect_to):
-    client = get_client()
-    response = client.auth.sign_in_with_oauth(
-        {
-            "provider": provider,
-            "options": {"redirect_to": redirect_to},
-        }
-    )
-    auth_client = client.auth
-    storage = getattr(auth_client, "_storage", None)
-    storage_key = getattr(auth_client, "_storage_key", None)
-    code_verifier = (
-        storage.get_item(f"{storage_key}-code-verifier")
-        if storage is not None and storage_key
-        else None
-    )
-    oauth_url = getattr(response, "url", None)
-    if not oauth_url or not code_verifier:
-        raise RuntimeError("Supabase did not create a PKCE OAuth challenge.")
-    return oauth_url, code_verifier
-
-
 def exchange_auth_code(code, code_verifier=None):
     client = get_client()
     exchange_params = {"auth_code": code}
@@ -163,6 +170,7 @@ def get_admin_user_directory():
         raise SupabaseConfigurationError("Supabase admin access is not configured.")
 
     accounts = []
+    allowed_admins = configured_admin_emails()
     per_page = 1000
     max_pages = 10
     truncated = False
@@ -196,11 +204,6 @@ def get_admin_user_directory():
 
             email = user.get("email") or ""
             verified = bool(user.get("email_confirmed_at") or user.get("confirmed_at"))
-            allowed_admins = {
-                address.strip().lower()
-                for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
-                if address.strip()
-            }
             identity_providers = {
                 identity.get("provider", "").lower()
                 for identity in identities
@@ -219,7 +222,7 @@ def get_admin_user_directory():
                     "email": email,
                     "display_name": user_metadata.get("display_name")
                     or user_metadata.get("full_name")
-                    or (email.split("@", 1)[0] if email else "PlacementCare member"),
+                    or (email.split("@", 1)[0] if email else "CareerPilot AI member"),
                     "provider": provider or "email",
                     "verified": verified,
                     "role": "admin"
