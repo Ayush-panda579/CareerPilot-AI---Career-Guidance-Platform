@@ -5,6 +5,8 @@
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PlacementCare brings career roadmaps, learning goals, resume tools, and AI guidance together to help you move toward your next opportunity.">
+    <meta name="theme-color" content="#142641">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 
     <title>
@@ -23,19 +25,22 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
-.logo-icon {
+        .logo-icon {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 6px;
     border-radius: 12px;
-    background: rgba(37, 99, 235, 0.08);
+    background: rgba(102, 87, 200, 0.08);
     transition: 0.3s ease;
 }
 
 .navbar-brand:hover .logo-icon {
     transform: translateY(-2px) scale(1.05);
 }
+
+[data-tilt] { transform-style: preserve-3d; transition: transform .22s ease, box-shadow .22s ease; }
+@media (prefers-reduced-motion: reduce) { [data-tilt] { transition: none !important; } }
         :root{
             --primary:#2563eb;
             --secondary:#7c3aed;
@@ -221,12 +226,12 @@
 
     <!-- BRAND TEXT -->
     <span class="fw-bold">
-        CareerPilot <span style="color:#2563EB;">AI</span>
+        PlacementCare
     </span>
 
 </a>
 
-        <button class="navbar-toggler" data-bs-toggle="collapse" data-bs-target="#navbarMenu">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMenu" aria-controls="navbarMenu" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
 
@@ -234,21 +239,24 @@
 
             <ul class="navbar-nav ms-auto">
 
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('home') }}">Home</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('features') }}">Features</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('features') }}">Explore</a></li>
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('roadmap') }}">Roadmap</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('careers') }}">Careers</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('contact') }}">Contact</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('careers') }}">Career paths</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('content_page', slug='resources') }}">Resources</a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('about') }}">About</a></li>
 
             </ul>
 
             <div class="ms-lg-4 mt-3 mt-lg-0">
 
-                {% if session.get('user') %}
+                {% if g.current_user %}
 
-                    <a href="{{ url_for('dashboard') }}" class="btn btn-gradient">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-gradient me-2">
                         Dashboard
                     </a>
+                    <form action="{{ url_for('logout') }}" method="post" class="d-inline">
+                        <button class="btn btn-outline-secondary" type="submit">Sign out</button>
+                    </form>
 
                 {% else %}
 
@@ -278,9 +286,9 @@
         {% if messages %}
             {% for category,message in messages %}
 
-                <div class="alert alert-{{ category }} alert-dismissible fade show">
+                <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
                     {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Dismiss message"></button>
                 </div>
 
             {% endfor %}
@@ -303,14 +311,12 @@
             <!-- BRAND -->
             <div class="col-md-4">
 
-                <h5 class="fw-bold text-primary">
-                    <i class="bi bi-stars"></i> CareerPilot AI
+<h5 class="fw-bold text-primary">
+                    <i class="bi bi-stars" aria-hidden="true"></i> PlacementCare
                 </h5>
 
                 <p class="text-muted mt-3">
-                    AI-powered career intelligence platform helping students and professionals
-                    discover careers, improve resumes, and build job-ready skills with
-                    personalized guidance.
+                    A thoughtful career workspace for roadmaps, learning goals, resume support, and practical guidance.
                 </p>
 
                 <div class="mt-3">
@@ -350,10 +356,10 @@
 
                 <ul class="list-unstyled mt-3">
 
-                    <li class="mb-2"><a class="footer-link" href="#">Resume Analyzer</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">Skill Extractor</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">AI Mentor</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">Job Matcher</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='resume-analyzer') }}">Resume Analyzer</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='skill-extractor') }}">Skill Extractor</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='ai-mentor') }}">AI Mentor</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='job-matcher') }}">Job Matcher</a></li>
 
                 </ul>
 
@@ -366,10 +372,10 @@
 
                 <ul class="list-unstyled mt-3">
 
-                    <li class="mb-2"><a class="footer-link" href="#">Blog</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">Learning Hub</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">Interview Prep</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('contact') }}">Help Center</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='blog') }}">Blog</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='learning-hub') }}">Learning Hub</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='interview-prep') }}">Interview Prep</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='help-center') }}">Help Center</a></li>
 
                 </ul>
 
@@ -382,9 +388,9 @@
 
                 <ul class="list-unstyled mt-3">
 
-                    <li class="mb-2"><a class="footer-link" href="#">About</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">Privacy Policy</a></li>
-                    <li class="mb-2"><a class="footer-link" href="#">Terms</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('about') }}">About</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='privacy-policy') }}">Privacy Policy</a></li>
+                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='terms') }}">Terms</a></li>
                     <li class="mb-2"><a class="footer-link" href="{{ url_for('contact') }}">Contact</a></li>
 
                 </ul>
@@ -401,13 +407,13 @@
 
             <div class="col-md-6 text-muted">
 
-                © 2026 CareerPilot AI. All Rights Reserved.
+                © 2026 PlacementCare. All Rights Reserved.
 
             </div>
 
             <div class="col-md-6 text-md-end text-muted">
 
-                Built with ❤️ for future professionals · Created by Ayush Panda
+                Created by Ayush Panda · Helping people find their next direction
 
             </div>
 
@@ -419,12 +425,15 @@
 
 <!-- ================= FLOATING AI CHAT BUTTON ================= -->
 
-<a href="{{ url_for('chatbot') }}" class="ai-float-btn">
-    <i class="bi bi-chat-dots-fill"></i>
+{% if g.current_user %}
+<a href="{{ url_for('chatbot') }}" class="ai-float-btn" aria-label="Open PlacementCare AI career mentor">
+    <i class="bi bi-chat-dots-fill" aria-hidden="true"></i>
 </a>
+{% endif %}
 
 <!-- Bootstrap JS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/tilt.js') }}" defer></script>
 
 {% block extra_js %}{% endblock %}
 

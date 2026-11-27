@@ -7,5 +7,6 @@ Werkzeug==3.0.3
 requests==2.32.3
 Jinja2==3.1.4
 gunicorn==23.0.0  # for production
-psycopg[binary]>=3.2,<4
+
 boto3>=1.35,<2
+supabase>=2.0,<3

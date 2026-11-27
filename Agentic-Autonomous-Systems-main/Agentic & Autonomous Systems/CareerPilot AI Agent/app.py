@@ -1,57 +1,57 @@
+import hashlib
+import hmac
 import os
+import re
 import secrets
+import threading
+import time
 import uuid
+from functools import wraps
 from pathlib import Path
 
+from dotenv import load_dotenv
 from flask import (
     Flask,
+    flash,
+    g,
+    jsonify,
+    current_app,
+    redirect,
     render_template,
     request,
-    redirect,
     url_for,
-    session,
-    flash,
-    jsonify,
-    current_app
 )
 from werkzeug.utils import secure_filename
-from werkzeug.security import (
-    generate_password_hash,
-    check_password_hash
-)
-from dotenv import load_dotenv
 
 APP_ROOT = Path(__file__).resolve().parent
 load_dotenv(APP_ROOT / ".env")
 
-from db import (
-    init_db,
-    create_user,
-    get_user,
-    create_contact_message,
-    DuplicateUserError,
-)
+import db
 from services.storage_service import (
     StorageConfigurationError,
     StorageError,
     save_upload,
 )
 from services.gemini_service import (
-    generate_ai_response,
     GeminiConfigurationError,
-    GeminiServiceError
+    GeminiServiceError,
+    generate_ai_response,
 )
 
-# ==================================================
-# APP CONFIG
-# ==================================================
 
 app = Flask(__name__)
-
 IS_VERCEL = os.getenv("VERCEL") == "1"
 secret_key = os.getenv("SECRET_KEY")
+if not secret_key and os.getenv("SUPABASE_JWT_SECRET"):
+    secret_key = hmac.new(
+        os.environ["SUPABASE_JWT_SECRET"].encode(),
+        b"careerpilot-flask-session-v1",
+        hashlib.sha256,
+    ).hexdigest()
 if IS_VERCEL and not secret_key:
-    raise RuntimeError("Set SECRET_KEY in the Vercel project environment variables.")
+    raise RuntimeError(
+        "Configure SECRET_KEY or the Supabase JWT secret for Flask sessions."
+    )
 
 app.secret_key = secret_key or secrets.token_hex(32)
 app.config.update(
@@ -62,467 +62,578 @@ app.config.update(
 
 UPLOAD_FOLDER = str(APP_ROOT / "uploads")
 MAX_UPLOAD_MB = 4 if IS_VERCEL else 5
-
 ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
-
+ACCESS_COOKIE = "careerpilot_access"
+REFRESH_COOKIE = "careerpilot_refresh"
+REFRESH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
+AUTH_RATE_LIMIT_WINDOW = 300
+AUTH_RATE_LIMIT_MAX = 10
+_AUTH_ATTEMPTS = {}
+_AUTH_ATTEMPTS_LOCK = threading.Lock()
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
 
 if not IS_VERCEL:
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ==================================================
-# DATABASE INIT
-# ==================================================
 
-init_db()
+def _set_auth_cookies(response, auth_session):
+    response.set_cookie(
+        ACCESS_COOKIE,
+        auth_session.access_token,
+        max_age=max(60, int(auth_session.expires_in or 3600)),
+        httponly=True,
+        secure=IS_VERCEL,
+        samesite="Lax",
+        path="/",
+    )
+    response.set_cookie(
+        REFRESH_COOKIE,
+        auth_session.refresh_token,
+        max_age=REFRESH_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=IS_VERCEL,
+        samesite="Lax",
+        path="/",
+    )
+    return response
 
-# ==================================================
-# HELPERS
-# ==================================================
+
+@app.before_request
+def load_current_user():
+    g.current_user = None
+    g.supabase_client = None
+    g.auth_session = None
+    g.clear_auth_cookies = False
+
+    if request.endpoint == "static":
+        return None
+
+    access_token = request.cookies.get(ACCESS_COOKIE)
+    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    if not access_token and not refresh_token:
+        return None
+
+    try:
+        context = db.authenticate_session(access_token, refresh_token)
+    except db.SupabaseConfigurationError:
+        current_app.logger.exception("Supabase auth is not configured")
+        return jsonify({"error": "Authentication is temporarily unavailable."}), 503
+    except Exception:
+        current_app.logger.exception("Could not validate the Supabase session")
+        return jsonify({"error": "Authentication is temporarily unavailable."}), 503
+
+    if context is None:
+        g.clear_auth_cookies = True
+        return None
+
+    g.current_user = context["user"]
+    g.supabase_client = context["client"]
+    g.auth_session = context["session"]
+    return None
+
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=()"
+    )
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    if IS_VERCEL:
+        response.headers["Strict-Transport-Security"] = "max-age=63072000"
+
+    if getattr(g, "clear_auth_cookies", False):
+        response.delete_cookie(
+            ACCESS_COOKIE, path="/", secure=IS_VERCEL, samesite="Lax"
+        )
+        response.delete_cookie(
+            REFRESH_COOKIE, path="/", secure=IS_VERCEL, samesite="Lax"
+        )
+    elif getattr(g, "auth_session", None):
+        _set_auth_cookies(response, g.auth_session)
+    return response
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if g.current_user is None:
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Authentication required."}), 401
+            flash("Please sign in to continue.", "warning")
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
 
 def allowed_file(filename):
-
-    return (
-        "." in filename and
-        filename.rsplit(
-            ".", 1
-        )[1].lower() in ALLOWED_EXTENSIONS
-    )
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def generate_dashboard_data():
-
-    return {
-
-        "ats_score": 82,
-
-        "job_readiness": 85,
-
-        "skills": [
-            "Python",
-            "Flask",
-            "SQL",
-            "HTML",
-            "CSS",
-            "Bootstrap"
-        ],
-
-        "gaps": [
-            "Git",
-            "GitHub",
-            "Docker",
-            "AWS"
-        ],
-
-        "career": [
-            "Python Developer",
-            "Full Stack Developer",
-            "Data Analyst",
-            "Cloud Engineer",
-            "AI Engineer"
-        ],
-
-        "roadmap": [
-
-            {
-                "topic": "Python Fundamentals",
-                "youtube":
-                "https://www.youtube.com/results?search_query=python+full+course"
-            },
-
-            {
-                "topic": "Object Oriented Programming",
-                "youtube":
-                "https://www.youtube.com/results?search_query=python+oop"
-            },
-
-            {
-                "topic": "Flask Development",
-                "youtube":
-                "https://www.youtube.com/results?search_query=flask+tutorial"
-            },
-
-            {
-                "topic": "SQL Database",
-                "youtube":
-                "https://www.youtube.com/results?search_query=sql+course"
-            }
-        ],
-
-        "certifications": [
-
-            "Google Data Analytics",
-
-            "AWS Cloud Practitioner",
-
-            "Meta Backend Developer",
-
-            "IBM Python Certificate",
-
-            "Microsoft Azure Fundamentals"
-        ],
-
-        "projects": [
-
-            "CareerPilot AI",
-
-            "Job Portal",
-
-            "Hospital Management System",
-
-            "Online Examination System",
-
-            "E-Library Management"
-        ],
-
-        "technical_questions": [
-
-            "What is Flask?",
-
-            "What is REST API?",
-
-            "Difference between List and Tuple?",
-
-            "Explain OOP Concepts.",
-
-            "What is SQL JOIN?"
-        ],
-
-        "hr_questions": [
-
-            "Tell me about yourself.",
-
-            "Why should we hire you?",
-
-            "What are your strengths?",
-
-            "What are your weaknesses?",
-
-            "Where do you see yourself in 5 years?"
+def _is_auth_rate_limited():
+    now = time.monotonic()
+    client_ip = request.remote_addr or "unknown"
+    key = ("auth", client_ip)
+    with _AUTH_ATTEMPTS_LOCK:
+        attempts = [
+            attempt
+            for attempt in _AUTH_ATTEMPTS.get(key, [])
+            if now - attempt < AUTH_RATE_LIMIT_WINDOW
         ]
-    }
+        if len(attempts) >= AUTH_RATE_LIMIT_MAX:
+            _AUTH_ATTEMPTS[key] = attempts
+            return True
+        attempts.append(now)
+        _AUTH_ATTEMPTS[key] = attempts
+        return False
 
-# ==================================================
-# HOME
-# ==================================================
+
+def _friendly_auth_error(error, action):
+    message = str(error).lower()
+    if "email not confirmed" in message or "email_not_confirmed" in message:
+        return "Please confirm your email address before signing in."
+    if "password" in message and any(
+        phrase in message for phrase in ("at least", "too short", "minimum")
+    ):
+        return "Choose a password with at least 8 characters."
+    if "rate limit" in message or "too many" in message:
+        return "Too many attempts. Please wait a moment and try again."
+    if action == "register":
+        return "We could not create the account. Check the information and try again."
+    return "Unable to sign in with those credentials. Please check them and try again."
+
+
+def _current_user_id():
+    return str(g.current_user.id)
+
+
+def _empty_dashboard_data():
+    return {"profile": None, "resumes": [], "progress": []}
+
 
 @app.route("/")
 def home():
     return render_template("home.html")
 
+
 @app.route("/favicon.ico")
 def favicon():
-    return redirect(
-        url_for("static", filename="favicon.svg")
-    )
+    return redirect(url_for("static", filename="favicon.svg"))
 
-# ==================================================
-# FEATURES
-# ==================================================
 
 @app.route("/features")
 def features():
     return render_template("features.html")
 
-# ==================================================
-# ROADMAP
-# ==================================================
 
 @app.route("/roadmap")
 def roadmap():
     return render_template("roadmap.html")
 
-# ==================================================
-# CAREERS
-# ==================================================
 
 @app.route("/careers")
 def careers():
     return render_template("careers.html")
 
-# ==================================================
-# CONTACT
-# ==================================================
+
+@app.route("/about")
+def about():
+    return render_template("about.html")
+
+
+@app.route("/<slug>")
+def content_page(slug):
+    pages = {
+        "resume-analyzer": ("Resume Analyzer", "Turn your resume into a clearer story. Upload a PDF or document to keep it in your private workspace, then explore the analysis tools available to you.", "upload", "Analyze a resume", ["Private resume library", "ATS-ready structure guidance", "Actionable next steps"]),
+        "skill-extractor": ("Skill Extractor", "Make your strengths easier to see. Start with your resume and build a clearer picture of the skills you can bring to your next role.", "upload", "Upload a resume", ["Surface core strengths", "Spot skills to develop", "Connect skills to career paths"]),
+        "ai-mentor": ("AI Mentor", "Get thoughtful support for career decisions, interview practice, and your next professional move.", "chatbot", "Talk to your mentor", ["Career questions, answered", "Interview practice prompts", "Practical next steps"]),
+        "job-matcher": ("Job Matcher", "Explore career directions that align with your interests and strengths. Start with the career paths library and use your roadmap to plan what comes next.", "careers", "Explore career paths", ["Browse role families", "Understand common skills", "Build a personal learning plan"]),
+        "resources": ("Career resources", "A growing collection of practical guides to help you make confident career decisions.", "roadmap", "Explore your roadmap", ["Career planning guides", "Resume and interview advice", "Skill-building ideas"]),
+        "blog": ("The PlacementCare journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
+        "learning-hub": ("Learning hub", "Turn a big goal into small, trackable steps. Your learning plan is saved to your account and updates live across sessions.", "dashboard", "Open your dashboard", ["Create learning goals", "Track completed milestones", "See progress update in real time"]),
+        "interview-prep": ("Interview prep", "Practice the moments that matter, from your opening story to the questions you want to ask.", "chatbot", "Practice with your AI mentor", ["Structure concise answers", "Prepare thoughtful questions", "Build confidence through practice"]),
+        "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the PlacementCare team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
+        "privacy-policy": ("Privacy policy", "PlacementCare is built to keep your career workspace personal. Account data and saved career materials are scoped to your signed-in account through Supabase Row Level Security. Uploaded resumes are handled by the configured private storage service. We do not sell your personal information. Contact us to ask about your data or privacy.", "contact", "Privacy questions", []),
+        "terms": ("Terms of use", "PlacementCare provides career planning and educational guidance to support your decisions. AI-generated suggestions are informational and are not a guarantee of employment, hiring outcomes, or professional advice. You are responsible for reviewing and verifying recommendations before acting on them. Use the service lawfully and keep your account credentials secure.", "contact", "Contact us", []),
+    }
+    page = pages.get(slug)
+    if page is None:
+        return render_template("404.html"), 404
+    title, description, action, action_label, highlights = page
+    return render_template(
+        "hub.html",
+        title=title,
+        description=description,
+        action_url=url_for(action),
+        action_label=action_label,
+        highlights=highlights,
+    )
+
 
 @app.route("/contact", methods=["GET", "POST"])
 def contact():
-
     if request.method == "POST":
         name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip()
+        email = request.form.get("email", "").strip().lower()
         message = request.form.get("message", "").strip()
+        valid_email = re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
 
-        if not name or not email or not message:
-            flash("Please complete all contact form fields.", "warning")
+        if not name or len(name) > 120 or not valid_email or len(email) > 254:
+            flash("Enter a name and valid email address.", "warning")
+            return redirect(url_for("contact"))
+        if not message or len(message) > 5000:
+            flash("Keep your message between 1 and 5,000 characters.", "warning")
             return redirect(url_for("contact"))
 
-        create_contact_message(name, email, message)
+        try:
+            db.create_contact_message(name, email, message)
+        except Exception:
+            current_app.logger.exception("Could not save a contact message")
+            flash("Your message could not be sent right now. Please try again.", "danger")
+            return redirect(url_for("contact"))
+
         flash("Your message has been received. Thank you for contacting us.", "success")
         return redirect(url_for("contact"))
 
     return render_template("contact.html")
 
-# ==================================================
-# REGISTER
-# ==================================================
 
-@app.route(
-    "/register",
-    methods=["GET", "POST"]
-)
+@app.route("/register", methods=["GET", "POST"])
 def register():
+    if g.current_user is not None:
+        return redirect(url_for("dashboard"))
 
     if request.method == "POST":
+        if _is_auth_rate_limited():
+            flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+            return render_template("register.html"), 429
 
-        username = request.form.get("username", "").strip()
-        email = request.form.get("email", "").strip()
+        display_name = request.form.get("display_name", "").strip()
+        email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
+        valid_email = re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
 
-        if not username or not email or not password:
-            flash("Please complete all registration fields.", "warning")
-            return redirect(url_for("register"))
+        if not display_name or len(display_name) > 100 or not valid_email:
+            flash("Enter your name and a valid email address.", "warning")
+            return render_template("register.html"), 400
+        if len(password) < 8:
+            flash("Choose a password with at least 8 characters.", "warning")
+            return render_template("register.html"), 400
 
-        hashed_password = (
-            generate_password_hash(
-                password
+        redirect_url = os.getenv("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")
+        if not redirect_url:
+            deployment_host = (
+                os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL")
             )
-        )
-
+            if IS_VERCEL and deployment_host:
+                redirect_url = f"https://{deployment_host}/auth/callback"
+            elif not IS_VERCEL:
+                redirect_url = url_for("auth_callback", _external=True)
+        if not redirect_url:
+            flash("Email confirmation is not configured for this deployment.", "danger")
+            return render_template("register.html"), 503
         try:
+            result = db.sign_up(email, password, display_name, redirect_url)
+        except Exception as error:
+            current_app.logger.warning("Supabase sign-up failed: %s", error)
+            flash(_friendly_auth_error(error, "register"), "danger")
+            return render_template("register.html"), 400
 
-            create_user(
-                username,
-                email,
-                hashed_password
-            )
-
-            flash(
-                "Registration Successful!",
-                "success"
-            )
-
-            return redirect(
-                url_for("login")
-            )
-
-        except DuplicateUserError:
-
-            flash(
-                "Username or Email already exists",
-                "danger"
-            )
-
-    return render_template(
-        "register.html"
-    )
-
-# ==================================================
-# LOGIN
-# ==================================================
-
-@app.route(
-    "/login",
-    methods=["GET", "POST"]
-)
-def login():
-
-    if request.method == "POST":
-
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-
-        user = get_user(username) if username else None
-
-        if user and password and check_password_hash(
-            user["password"],
-            password
-        ):
-
-            session["user"] = username
-
-            flash(
-                "Login Successful",
-                "success"
-            )
-
-            return redirect(
-                url_for("dashboard")
-            )
+        if result.session:
+            g.auth_session = result.session
+            flash("Your account is ready.", "success")
+            return redirect(url_for("dashboard"))
 
         flash(
-            "Invalid Username or Password",
-            "danger"
+            "Check your inbox for a confirmation link to finish creating your account.",
+            "info",
         )
+        return redirect(url_for("login"))
 
-    return render_template(
-        "login.html"
-    )
+    return render_template("register.html")
 
-# ==================================================
-# DASHBOARD
-# ==================================================
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if g.current_user is not None:
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        if _is_auth_rate_limited():
+            flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+            return render_template("login.html"), 429
+
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        if not email or not password:
+            flash("Enter your email and password.", "warning")
+            return render_template("login.html"), 400
+
+        try:
+            result = db.sign_in(email, password)
+        except Exception as error:
+            current_app.logger.info("Supabase sign-in was rejected: %s", error)
+            flash(_friendly_auth_error(error, "login"), "danger")
+            return render_template("login.html"), 401
+
+        if not result.session:
+            flash("Please confirm your email address before signing in.", "warning")
+            return redirect(url_for("login"))
+
+        g.auth_session = result.session
+        flash("Welcome back.", "success")
+        return redirect(url_for("dashboard"))
+
+    return render_template("login.html")
+
+
+@app.route("/auth/callback")
+def auth_callback():
+    token_hash = request.args.get("token_hash", "").strip()
+    token_type = request.args.get("type", "signup").strip()
+    code = request.args.get("code", "").strip()
+
+    try:
+        if token_hash:
+            allowed_types = {
+                "signup", "email", "magiclink", "recovery", "invite",
+                "email_change", "sms", "phone_change", "reauthentication",
+            }
+            result = db.verify_email_token(
+                token_hash,
+                token_type if token_type in allowed_types else "signup",
+            )
+        elif code:
+            result = db.exchange_auth_code(code)
+        else:
+            flash("That confirmation link is invalid or expired.", "warning")
+            return redirect(url_for("login"))
+    except Exception:
+        current_app.logger.exception("Supabase confirmation callback failed")
+        flash("That confirmation link is invalid or expired.", "warning")
+        return redirect(url_for("login"))
+
+    if not result.session:
+        flash("Please sign in to continue.", "info")
+        return redirect(url_for("login"))
+
+    g.auth_session = result.session
+    flash("Email confirmed. Your account is ready.", "success")
+    return redirect(url_for("dashboard"))
+
 
 @app.route("/dashboard")
+@login_required
 def dashboard():
+    data_error = False
+    data = _empty_dashboard_data()
+    try:
+        data = db.get_dashboard_data(g.supabase_client, _current_user_id())
+    except Exception:
+        current_app.logger.exception("Could not load the CareerPilot dashboard")
+        data_error = True
 
-    if "user" not in session:
-
-        flash(
-            "Please login first",
-            "warning"
-        )
-
-        return redirect(
-            url_for("login")
-        )
-
-    result = generate_dashboard_data()
-
+    profile = data.get("profile") or {}
+    metadata = getattr(g.current_user, "user_metadata", None) or {}
+    display_name = (
+        profile.get("display_name")
+        or metadata.get("display_name")
+        or getattr(g.current_user, "email", "PlacementCare member").split("@")[0]
+    )
+    progress = data.get("progress", [])
     return render_template(
         "dashboard.html",
-        username=session["user"],
-        result=result
+        username=display_name,
+        resumes=data.get("resumes", []),
+        progress=progress,
+        completed_count=sum(1 for item in progress if item.get("completed")),
+        data_error=data_error,
+        supabase_url=os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
     )
 
-# ==================================================
-# RESUME UPLOAD
-# ==================================================
 
-@app.route(
-    "/upload",
-    methods=["GET", "POST"]
-)
+@app.route("/api/dashboard/data")
+@login_required
+def dashboard_data_api():
+    try:
+        data = db.get_dashboard_data(g.supabase_client, _current_user_id())
+    except Exception:
+        current_app.logger.exception("Could not refresh the CareerPilot dashboard")
+        return jsonify({"error": "Dashboard data is temporarily unavailable."}), 503
+
+    response = jsonify(data)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/dashboard/progress", methods=["POST"])
+@login_required
+def add_progress():
+    goal = request.form.get("goal", "").strip()
+    if not goal or len(goal) > 180:
+        flash("Enter a learning goal between 1 and 180 characters.", "warning")
+        return redirect(url_for("dashboard"))
+    try:
+        db.create_learning_progress(g.supabase_client, _current_user_id(), goal)
+        flash("Learning goal added.", "success")
+    except Exception:
+        current_app.logger.exception("Could not save learning progress")
+        flash("Your learning goal could not be saved. Please try again.", "danger")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/dashboard/progress/<progress_id>/toggle", methods=["POST"])
+@login_required
+def toggle_progress(progress_id):
+    try:
+        progress_id = str(uuid.UUID(progress_id))
+    except (ValueError, TypeError):
+        return "Not found", 404
+
+    completed = request.form.get("completed") == "true"
+    try:
+        updated = db.update_learning_progress(
+            g.supabase_client,
+            _current_user_id(),
+            progress_id,
+            completed,
+        )
+    except Exception:
+        current_app.logger.exception("Could not update learning progress")
+        flash("Your learning progress could not be updated.", "danger")
+        return redirect(url_for("dashboard"))
+    if updated is None:
+        return "Not found", 404
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/dashboard/progress/<progress_id>/delete", methods=["POST"])
+@login_required
+def delete_progress(progress_id):
+    try:
+        progress_id = str(uuid.UUID(progress_id))
+    except (ValueError, TypeError):
+        return "Not found", 404
+    try:
+        deleted = db.delete_learning_progress(
+            g.supabase_client,
+            _current_user_id(),
+            progress_id,
+        )
+    except Exception:
+        current_app.logger.exception("Could not delete learning progress")
+        flash("Your learning goal could not be removed.", "danger")
+        return redirect(url_for("dashboard"))
+    if not deleted:
+        return "Not found", 404
+    flash("Learning goal removed.", "info")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/api/realtime/session")
+@login_required
+def realtime_session():
+    public_key = (
+        os.getenv("SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    )
+    if not public_key or not g.auth_session:
+        return jsonify({"error": "Live updates are unavailable."}), 503
+    response = jsonify(
+        {
+            "access_token": g.auth_session.access_token,
+            "user_id": _current_user_id(),
+            "supabase_url": os.getenv("SUPABASE_URL")
+            or os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
+            "publishable_key": public_key,
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/upload", methods=["GET", "POST"])
+@login_required
 def upload():
-
-    if "user" not in session:
-
-        return redirect(
-            url_for("login")
-        )
-
     if request.method == "POST":
+        file = request.files.get("resume")
+        if not file or not file.filename:
+            flash("Choose a resume file to upload.", "warning")
+            return redirect(url_for("upload"))
+        if not allowed_file(file.filename):
+            flash("Only PDF, DOC, or DOCX files are allowed.", "danger")
+            return redirect(url_for("upload"))
 
-        file = request.files.get(
-            "resume"
-        )
-
-        if not file:
-
-            flash(
-                "Please select a file",
-                "warning"
-            )
-
-            return redirect(
-                request.url
-            )
-
-        if file.filename == "":
-
-            flash(
-                "No file selected",
-                "warning"
-            )
-
-            return redirect(
-                request.url
-            )
-
-        if not allowed_file(
-            file.filename
-        ):
-
-            flash(
-                "Only PDF, DOC, or DOCX files are allowed",
-                "danger"
-            )
-
-            return redirect(
-                request.url
-            )
-
-        filename = (
-            f"{uuid.uuid4()}_"
-            f"{secure_filename(file.filename)}"
-        )
+        original_filename = secure_filename(file.filename)[:255]
+        if not original_filename:
+            flash("The selected filename is not valid.", "warning")
+            return redirect(url_for("upload"))
+        storage_key = f"{uuid.uuid4()}_{original_filename}"
+        user_id = _current_user_id()
 
         try:
-            save_upload(
-                file,
-                filename,
-                app.config["UPLOAD_FOLDER"],
+            resume = db.create_resume_upload(
+                g.supabase_client,
+                user_id,
+                original_filename,
+                storage_key,
             )
+        except Exception:
+            current_app.logger.exception("Could not create resume metadata")
+            flash("Your resume could not be prepared for upload.", "danger")
+            return redirect(url_for("upload"))
+
+        try:
+            save_upload(file, storage_key, app.config["UPLOAD_FOLDER"])
         except StorageConfigurationError as error:
             current_app.logger.error("Resume storage is not configured: %s", error)
-            flash(
-                "Resume uploads are not configured for this deployment.",
-                "danger",
+            db.update_resume_upload_status(
+                g.supabase_client, user_id, resume["id"], "failed"
             )
-            return render_template(
-                "upload.html",
-                max_upload_mb=MAX_UPLOAD_MB,
-            ), 503
+            flash("Resume uploads are not configured for this deployment.", "danger")
+            return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB), 503
         except StorageError as error:
             current_app.logger.error("Resume upload failed: %s", error)
-            flash(
-                "Resume upload failed. Please try again later.",
-                "danger",
+            db.update_resume_upload_status(
+                g.supabase_client, user_id, resume["id"], "failed"
             )
-            return render_template(
-                "upload.html",
-                max_upload_mb=MAX_UPLOAD_MB,
-            ), 502
+            flash("Resume upload failed. Please try again later.", "danger")
+            return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB), 502
 
-        flash(
-            "Resume uploaded successfully",
-            "success"
-        )
+        try:
+            db.update_resume_upload_status(
+                g.supabase_client, user_id, resume["id"], "ready"
+            )
+        except Exception:
+            current_app.logger.exception("Could not update resume upload status")
+            flash("The file was uploaded, but its status could not be updated.", "warning")
+            return redirect(url_for("dashboard"))
 
-        return redirect(
-            url_for("dashboard")
-        )
+        flash("Resume uploaded successfully.", "success")
+        return redirect(url_for("dashboard"))
 
-    return render_template(
-        "upload.html",
-        max_upload_mb=MAX_UPLOAD_MB,
-    )
+    return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB)
 
-# ==================================================
-# CHATBOT PAGE
-# ==================================================
 
 @app.route("/chatbot")
+@login_required
 def chatbot():
-
-    if "user" not in session:
-
-        flash(
-            "Please login first",
-            "warning"
-        )
-
-        return redirect(
-            url_for("login")
-        )
-
     return render_template(
         "chatbot.html",
-        username=session["user"]
+        username=(getattr(g.current_user, "user_metadata", None) or {}).get(
+            "display_name", "PlacementCare member"
+        ),
     )
 
 
-# ==================================================
-# CHATBOT AI API
-# ==================================================
-
-@app.route(
-    "/chatbot/ask",
-    methods=["POST"]
-)
+@app.route("/chatbot/ask", methods=["POST"])
+@login_required
 def chatbot_ask():
-
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "A JSON object with a message is required."}), 400
@@ -530,11 +641,10 @@ def chatbot_ask():
     message = data.get("message")
     if not isinstance(message, str) or not message.strip():
         return jsonify({"error": "Message must be a non-empty string."}), 400
-
-    message = message.strip()
+    message = message.strip()[:4000]
 
     prompt = (
-        "You are CareerPilot AI, a helpful career guidance assistant. "
+        "You are PlacementCare, a helpful career guidance assistant. "
         "Answer accurately and directly in no more than 5 concise bullet points "
         "or short sentences. For career advice, tailor recommendations to the "
         "user's question and use Markdown. If unrelated to careers, answer "
@@ -550,63 +660,31 @@ def chatbot_ask():
         current_app.logger.warning("Gemini request failed: %s", error)
         return jsonify({"error": str(error)}), 502
 
-    return jsonify({
-        "response": response
-    })
+    return jsonify({"response": response})
 
-# ==================================================
-# LOGOUT
-# ==================================================
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
+    if g.current_user is not None and g.auth_session:
+        try:
+            db.sign_out(g.auth_session.access_token, g.auth_session.refresh_token)
+        except Exception:
+            current_app.logger.info("Supabase sign-out cleanup failed")
+    g.clear_auth_cookies = True
+    flash("You have been signed out.", "info")
+    return redirect(url_for("home"))
 
-    session.clear()
-
-    flash(
-        "Logged out successfully",
-        "info"
-    )
-
-    return redirect(
-        url_for("home")
-    )
-
-# ==================================================
-# ERROR HANDLERS
-# ==================================================
 
 @app.errorhandler(404)
 def page_not_found(error):
-
-    return (
-        render_template(
-            "404.html"
-        ),
-        404
-    )
+    return render_template("404.html"), 404
 
 
 @app.errorhandler(413)
 def file_too_large(error):
+    flash(f"File size exceeds {MAX_UPLOAD_MB} MB.", "warning")
+    return redirect(url_for("upload"))
 
-    flash(
-        f"File size exceeds {MAX_UPLOAD_MB} MB",
-        "danger"
-    )
-
-    return redirect(
-        url_for("upload")
-    )
-
-# ==================================================
-# RUN APP
-# ==================================================
 
 if __name__ == "__main__":
-
-    app.run(
-        host="0.0.0.0",
-        port=5000,
-        debug=True
-    )
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)

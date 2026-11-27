@@ -1,262 +1,109 @@
 {% extends 'base.html' %}
 
-{% block title %}
-CareerPilot AI | Smart Career Guidance
-{% endblock %}
-
+{% block title %}PlacementCare | Find your next direction{% endblock %}
 {% block extra_css %}
-
-.hero-section{
-    padding:120px 0 100px;
-    background:linear-gradient(
-        135deg,
-        #f8fbff,
-        #eef4ff
-    );
-}
-
-.hero-title{
-    font-size:4.5rem;
-    font-weight:900;
-    line-height:1.1;
-}
-
-.hero-title span{
-    background:linear-gradient(
-        90deg,
-        #2563eb,
-        #7c3aed
-    );
-    -webkit-background-clip:text;
-    -webkit-text-fill-color:transparent;
-}
-
-.hero-text{
-    font-size:1.2rem;
-    color:#6b7280;
-    max-width:750px;
-    margin:auto;
-}
-
-.hero-badge{
-    display:inline-block;
-    background:#dbeafe;
-    color:#2563eb;
-    padding:10px 20px;
-    border-radius:999px;
-    font-weight:600;
-    margin-bottom:25px;
-}
-
-.hero-img{
-    max-width:100%;
-}
-
-.feature-card{
-    border:none;
-    border-radius:20px;
-    padding:30px;
-    box-shadow:0 10px 30px rgba(0,0,0,.06);
-    transition:.3s;
-    height:100%;
-}
-
-.feature-card:hover{
-    transform:translateY(-5px);
-}
-
-.feature-icon{
-    width:70px;
-    height:70px;
-    border-radius:20px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    color:white;
-    font-size:30px;
-    margin-bottom:20px;
-    background:linear-gradient(
-        135deg,
-        #2563eb,
-        #7c3aed
-    );
-}
-
-.feature-section{
-    padding:100px 0;
-}
-
-.timeline-section{
-    background:#f8fafc;
-    padding:100px 0;
-}
-
-.timeline-card{
-    background:white;
-    border-radius:20px;
-    padding:30px;
-    box-shadow:0 10px 25px rgba(0,0,0,.05);
-    margin-bottom:25px;
-}
-
-.stats-card{
-    text-align:center;
-    padding:30px;
-    border-radius:20px;
-    background:white;
-    box-shadow:0 10px 25px rgba(0,0,0,.05);
-}
-
-.stats-number{
-    font-size:2.5rem;
-    font-weight:800;
-    color:#2563eb;
-}
-
-.cta-section{
-    padding:100px 0;
-    background:linear-gradient(
-        135deg,
-        #2563eb,
-        #7c3aed
-    );
-    color:white;
-}
-
+<style>
+    .home-page { overflow: hidden; background: #f7f8fb; color: #191b2e; }
+    .hero-section { position: relative; padding: clamp(4rem, 8vw, 7rem) 0 4rem; background: radial-gradient(ellipse at 82% 20%, rgba(183,255,66,.16), transparent 34rem), linear-gradient(140deg,#f7f8fb 0%,#f2f0ff 55%,#ecf7f2 100%); }
+    .hero-grid { display: grid; grid-template-columns: minmax(0,1.04fr) minmax(300px,.96fr); align-items: center; gap: clamp(2rem,6vw,5rem); }
+    .eyebrow { color:#6252be; font-size:.76rem; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+    .hero-title { max-width: 720px; margin:1.1rem 0 1.25rem; font-size:clamp(3.25rem,7.2vw,6.2rem); font-weight:850; line-height:.98; letter-spacing:-.075em; }
+    .hero-title span { color:#6657c8; }
+    .hero-copy { max-width:570px; color:#636579; font-size:clamp(1rem,1.5vw,1.17rem); line-height:1.75; }
+    .hero-actions { display:flex; flex-wrap:wrap; gap:.8rem; margin-top:2rem; }
+    .btn-placement { border:0; border-radius:999px; padding:.9rem 1.35rem; background:#baff52; color:#181b2e; font-weight:750; box-shadow:0 12px 25px rgba(109,146,37,.18); transition:transform .2s ease, box-shadow .2s ease; }
+    .btn-placement:hover { color:#181b2e; transform:translateY(-2px); box-shadow:0 17px 32px rgba(109,146,37,.25); }
+    .btn-quiet { border:1px solid #d9d8e6; border-radius:999px; padding:.9rem 1.25rem; color:#292a43; background:rgba(255,255,255,.62); font-weight:700; }
+    .hero-proof { display:flex; align-items:center; gap:.7rem; margin-top:2.3rem; color:#77788c; font-size:.88rem; }
+    .proof-dot { width:.55rem; height:.55rem; border-radius:50%; background:#80c74d; box-shadow:0 0 0 5px #e5f3d8; }
+    .hero-visual { min-height:440px; position:relative; display:grid; place-items:center; perspective:1000px; }
+    .orbit { position:absolute; width:min(88%,420px); aspect-ratio:1; border:1px solid rgba(102,87,200,.18); border-radius:50%; transform:rotateX(62deg) rotateZ(-24deg); }
+    .orbit:before,.orbit:after { content:''; position:absolute; inset:12%; border:1px solid rgba(102,87,200,.13); border-radius:50%; }
+    .orbit:after { inset:25%; }
+    .visual-card { position:relative; z-index:1; width:min(92%,390px); padding:1.45rem; border:1px solid rgba(255,255,255,.8); border-radius:1.5rem; background:rgba(255,255,255,.84); box-shadow:0 35px 85px rgba(45,40,93,.17); backdrop-filter:blur(18px); transform:rotateY(-10deg) rotateX(5deg); transform-style:preserve-3d; }
+    .visual-head { display:flex; justify-content:space-between; align-items:center; color:#77788c; font-size:.77rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
+    .avatar-mark { display:grid; place-items:center; width:2.7rem; height:2.7rem; border-radius:.9rem; color:#fff; background:#6557c5; font-size:1.2rem; }
+    .visual-card h2 { margin:1.15rem 0 .3rem; font-size:1.55rem; font-weight:800; letter-spacing:-.04em; }
+    .visual-sub { color:#77788c; font-size:.88rem; }
+    .match-row { display:flex; align-items:center; gap:.85rem; margin-top:1.15rem; padding:.85rem; border:1px solid #edeef4; border-radius:1rem; background:#fff; }
+    .match-icon { display:grid; place-items:center; flex:0 0 2.6rem; height:2.6rem; border-radius:.8rem; color:#6456c2; background:#f1efff; }
+    .match-row strong { display:block; color:#292a43; font-size:.9rem; }
+    .match-row small { color:#85869a; }
+    .match-score { margin-left:auto; color:#6758c8; font-size:.82rem; font-weight:800; }
+    .progress-track { height:.42rem; margin-top:1.25rem; border-radius:99px; background:#edecf4; overflow:hidden; }
+    .progress-track span { display:block; width:68%; height:100%; border-radius:inherit; background:linear-gradient(90deg,#6557c5,#baff52); }
+    .floating-note { position:absolute; z-index:2; display:flex; align-items:center; gap:.55rem; padding:.7rem .9rem; border:1px solid rgba(255,255,255,.85); border-radius:1rem; background:#fff; box-shadow:0 12px 35px rgba(35,33,67,.12); color:#3a3b53; font-size:.8rem; font-weight:700; animation:float 5s ease-in-out infinite; }
+    .floating-note.one { top:12%; right:1%; } .floating-note.two { bottom:10%; left:0; animation-delay:-2.4s; }
+    .floating-note i { color:#6557c5; font-size:1.05rem; }
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-9px)} }
+    .section-wrap { padding:clamp(3.5rem,7vw,6rem) 0; }
+    .section-kicker { color:#6959c8; font-size:.75rem; font-weight:800; letter-spacing:.15em; text-transform:uppercase; }
+    .section-heading { margin:.7rem 0 1rem; color:#1d1e32; font-size:clamp(2rem,4vw,3.5rem); font-weight:820; letter-spacing:-.06em; }
+    .section-intro { max-width:620px; color:#77788c; line-height:1.7; }
+    .feature-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin-top:2.4rem; }
+    .feature-tile { min-height:200px; padding:1.35rem; border:1px solid #e9e9f0; border-radius:1.25rem; background:#fff; box-shadow:0 10px 25px rgba(36,35,70,.035); transition:transform .25s ease,box-shadow .25s ease; transform-style:preserve-3d; }
+    .feature-tile:hover { box-shadow:0 22px 48px rgba(36,35,70,.12); }
+    .feature-tile .icon { display:grid; place-items:center; width:2.7rem; height:2.7rem; margin-bottom:1.3rem; border-radius:.9rem; background:#f0efff; color:#6456c2; font-size:1.2rem; }
+    .feature-tile h3 { font-size:1.04rem; font-weight:800; }
+    .feature-tile p { margin:0; color:#77788c; font-size:.9rem; line-height:1.6; }
+    .path-band { padding:clamp(2rem,4vw,3.5rem); border-radius:1.5rem; background:#191b34; color:#fff; }
+    .path-band h2 { max-width:620px; font-size:clamp(1.8rem,4vw,3.2rem); font-weight:800; letter-spacing:-.06em; }
+    .path-band p { max-width:580px; color:#c4c4d3; line-height:1.7; }
+    .path-band .btn-placement { display:inline-block; text-decoration:none; }
+    @media(max-width:900px) { .hero-grid{grid-template-columns:1fr}.hero-visual{min-height:390px}.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    @media(max-width:575px) { .hero-section{padding-top:3.5rem}.hero-visual{min-height:350px}.floating-note.one{right:0}.visual-card{padding:1.1rem}.feature-grid{grid-template-columns:1fr}.feature-tile{min-height:auto}.hero-title{font-size:clamp(3rem,15vw,4.4rem)} }
+    @media(prefers-reduced-motion:reduce) { *,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important} }
+</style>
 {% endblock %}
 
 {% block content %}
-
-<!-- HERO -->
-
-<section class="hero-section">
-
-    <div class="container">
-
-        <div class="row align-items-center">
-
-            <div class="col-lg-6">
-
-                <div class="hero-badge">
-                    🚀 AI-Powered Career Intelligence
+<main class="home-page">
+    <section class="hero-section">
+        <div class="container hero-grid">
+            <div>
+                <p class="eyebrow">A clearer path to your next role</p>
+                <h1 class="hero-title">Your next move, <span>with direction.</span></h1>
+                <p class="hero-copy">PlacementCare brings your career roadmap, learning goals, resume workspace, and AI guidance together—so progress feels practical, personal, and yours.</p>
+                <div class="hero-actions">
+                    <a class="btn btn-placement" href="{{ url_for('register') }}">Build my career plan <i class="bi bi-arrow-up-right ms-1" aria-hidden="true"></i></a>
+                    <a class="btn btn-quiet" href="{{ url_for('features') }}">Explore the platform</a>
                 </div>
-
-                <h1 class="hero-title">
-                    Your Career,
-                    <span>Decoded.</span>
-                </h1>
-
-                <p class="hero-text mt-4">
-
-                    Upload your resume and receive AI-powered
-                    skill extraction, ATS scoring, career matching,
-                    project recommendations, certifications,
-                    interview preparation, and personalized roadmaps.
-
-                </p>
-
-                <div class="mt-5">
-
-                    <a href="/register"
-                       class="btn btn-gradient btn-lg me-3">
-
-                        Get Started
-
-                    </a>
-
-                    <a href="{{ url_for('chatbot') }}"
-                        class="btn btn-dark btn-lg">
-                            🤖 Try AI Assistant
-                        </a>
-
-
+                <div class="hero-proof"><span class="proof-dot" aria-hidden="true"></span>Private workspace · Real-time progress · Built for your next step</div>
+            </div>
+            <div class="hero-visual" aria-label="A preview of a personalized career roadmap">
+                <div class="orbit" aria-hidden="true"></div>
+                <div class="floating-note one"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>Small steps, real momentum</div>
+                <div class="visual-card" data-tilt>
+                    <div class="visual-head"><span>Your direction</span><span class="avatar-mark"><i class="bi bi-compass" aria-hidden="true"></i></span></div>
+                    <h2>Career roadmap</h2><p class="visual-sub">A plan shaped around your goals</p>
+                    <div class="match-row"><span class="match-icon"><i class="bi bi-code-slash" aria-hidden="true"></i></span><span><strong>Product designer</strong><small>Explore a path that fits</small></span><span class="match-score">01</span></div>
+                    <div class="match-row"><span class="match-icon"><i class="bi bi-bar-chart-line" aria-hidden="true"></i></span><span><strong>Build your foundations</strong><small>Skills · portfolio · practice</small></span><span class="match-score">02</span></div>
+                    <div class="progress-track" aria-label="Roadmap preview progress"><span></span></div>
                 </div>
-
+                <div class="floating-note two"><i class="bi bi-check2-circle" aria-hidden="true"></i>One goal at a time</div>
             </div>
-
-            <div class="col-lg-6 text-center">
-
-                <img src="https://cdn-icons-png.flaticon.com/512/3135/3135715.png"
-                     class="hero-img"
-                     alt="Career AI">
-
-            </div>
-
         </div>
+    </section>
 
-    </div>
-
-</section>
-
-<!-- STATS -->
-
-<section class="py-5">
-
-    <div class="container">
-
-        <div class="row g-4">
-
-            <div class="col-md-3">
-
-                <div class="stats-card">
-
-                    <div class="stats-number">
-                        5000+
-                    </div>
-
-                    <h6>Students Guided</h6>
-
-                </div>
-
+    <section class="section-wrap" aria-labelledby="tools-title">
+        <div class="container">
+            <p class="section-kicker">One workspace, more clarity</p>
+            <h2 class="section-heading" id="tools-title">Everything you need to move forward.</h2>
+            <p class="section-intro">From your first career question to your next interview, keep the useful pieces of your journey connected.</p>
+            <div class="feature-grid">
+                <a class="feature-tile text-decoration-none text-reset" href="{{ url_for('dashboard') }}" data-tilt><span class="icon"><i class="bi bi-grid-1x2" aria-hidden="true"></i></span><h3>Career dashboard</h3><p>Keep goals, resumes, and progress in one live workspace.</p></a>
+                <a class="feature-tile text-decoration-none text-reset" href="{{ url_for('roadmap') }}" data-tilt><span class="icon"><i class="bi bi-signpost-split" aria-hidden="true"></i></span><h3>Personal roadmap</h3><p>Turn a broad ambition into achievable milestones.</p></a>
+                <a class="feature-tile text-decoration-none text-reset" href="{{ url_for('content_page', slug='resume-analyzer') }}" data-tilt><span class="icon"><i class="bi bi-file-earmark-person" aria-hidden="true"></i></span><h3>Resume tools</h3><p>Organize your resume and prepare your next iteration.</p></a>
+                <a class="feature-tile text-decoration-none text-reset" href="{{ url_for('content_page', slug='ai-mentor') }}" data-tilt><span class="icon"><i class="bi bi-chat-square-heart" aria-hidden="true"></i></span><h3>AI career mentor</h3><p>Ask a question and get focused career guidance.</p></a>
             </div>
-
-            <div class="col-md-3">
-
-                <div class="stats-card">
-
-                    <div class="stats-number">
-                        120+
-                    </div>
-
-                    <h6>Career Paths</h6>
-
-                </div>
-
-            </div>
-
-            <div class="col-md-3">
-
-                <div class="stats-card">
-
-                    <div class="stats-number">
-                        300+
-                    </div>
-
-                    <h6>Projects</h6>
-
-                </div>
-
-            </div>
-
-            <div class="col-md-3">
-
-                <div class="stats-card">
-
-                    <div class="stats-number">
-                        50+
-                    </div>
-
-                    <h6>Certifications</h6>
-
-                </div>
-
-            </div>
-
         </div>
+    </section>
 
-    </div>
-
-</section>
-
-
+    <section class="container pb-5">
+        <div class="path-band d-flex flex-wrap justify-content-between align-items-center gap-4">
+            <div><p class="section-kicker mb-2" style="color:#c9f58a">Start where you are</p><h2>Good careers are built one clear step at a time.</h2><p class="mb-0">Find a path to explore, set your next goal, and let PlacementCare help you keep your momentum.</p></div>
+            <a class="btn btn-placement" href="{{ url_for('careers') }}">Explore career paths <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i></a>
+        </div>
+    </section>
+</main>
 {% endblock %}

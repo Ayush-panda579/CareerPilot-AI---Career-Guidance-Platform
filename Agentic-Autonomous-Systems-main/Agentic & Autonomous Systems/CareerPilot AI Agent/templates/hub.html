@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}{{ title }} | PlacementCare{% endblock %}
+{% block extra_css %}
+<style>
+.hub-page{min-height:58vh;padding:clamp(3rem,7vw,6rem) 0;background:radial-gradient(ellipse at 90% 10%,rgba(186,255,82,.12),transparent 24rem),#f7f8fb;color:#1d1e32}.hub-wrap{max-width:900px;margin:auto}.hub-panel{padding:clamp(1.5rem,5vw,3.5rem);border:1px solid #e8e8ef;border-radius:1.5rem;background:#fff;box-shadow:0 25px 70px rgba(35,33,67,.07)}.hub-panel h1{max-width:700px;margin:.8rem 0 1rem;font-size:clamp(2.5rem,7vw,4.5rem);font-weight:850;letter-spacing:-.07em}.hub-lede{max-width:680px;color:#707186;font-size:1.08rem;line-height:1.8}.hub-highlights{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.8rem;margin:2rem 0}.hub-highlight{padding:1rem;border:1px solid #ededf2;border-radius:1rem;background:#fafafe;color:#45465e;font-weight:650}.hub-highlight i{margin-right:.5rem;color:#6657c8}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+{% endblock %}
+{% block content %}
+<main class="hub-page"><div class="container hub-wrap"><article class="hub-panel"><p class="eyebrow">PlacementCare workspace</p><h1>{{ title }}</h1><p class="hub-lede">{{ description }}</p>{% if highlights %}<div class="hub-highlights">{% for item in highlights %}<div class="hub-highlight"><i class="bi bi-check2-circle" aria-hidden="true"></i>{{ item }}</div>{% endfor %}</div>{% endif %}<a class="btn btn-placement" href="{{ action_url }}">{{ action_label }} <i class="bi bi-arrow-up-right ms-1" aria-hidden="true"></i></a></article></div></main>
+{% endblock %}
