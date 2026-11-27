@@ -57,6 +57,24 @@ class FlaskSmokeTests(unittest.TestCase):
             patch.object(db, "authenticate_session", return_value=self.auth_context),
             patch.object(db, "sign_up", return_value=db.AuthResult(None, None)),
             patch.object(db, "sign_in", return_value=self.auth_result),
+            patch.object(
+                db,
+                "start_oauth",
+                return_value=("https://accounts.google.com/o/oauth2/v2/auth", "pkce-test-verifier"),
+            ),
+            patch.object(db, "exchange_auth_code", return_value=self.auth_result),
+            patch.object(db, "get_admin_user_directory", return_value={
+                "accounts": [{
+                    "email": "smoke-user@example.test",
+                    "display_name": "Smoke User",
+                    "provider": "email",
+                    "verified": True,
+                    "role": "member",
+                    "created_at": "2026-11-27T08:00:00+00:00",
+                    "last_sign_in_at": "2026-11-27T09:00:00+00:00",
+                }],
+                "truncated": False,
+            }),
             patch.object(db, "sign_out"),
             patch.object(db, "update_password"),
             patch.object(
@@ -319,8 +337,41 @@ class FlaskSmokeTests(unittest.TestCase):
         self.user.app_metadata = {"role": "admin"}
         response = self.client.get("/admin")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Administrator profile", response.data)
+        self.assertIn(b"Platform overview", response.data)
         self.assertIn(b"smoke-user@example.test", response.data)
+        self.assertIn(b"Passwords are never displayed", response.data)
+        self.assertNotIn(b"test-password", response.data)
+        db.get_admin_user_directory.assert_called_once_with()
+
+    def test_google_allowlist_requires_a_verified_google_identity(self):
+        self.user.email = "admin@placementcare.in"
+        self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+        self.user.app_metadata = {"provider": "google", "providers": ["google"]}
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": "admin@placementcare.in"}):
+            self.assertTrue(app_module._user_is_admin(self.user))
+            self.user.email_confirmed_at = None
+            self.assertFalse(app_module._user_is_admin(self.user))
+            self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+            self.user.app_metadata = {"provider": "email", "providers": ["email"]}
+            self.assertFalse(app_module._user_is_admin(self.user))
+
+    def test_google_sign_in_round_trips_pkce_verifier(self):
+        start = self.client.get("/auth/google")
+        self.assertEqual(start.status_code, 302)
+        self.assertEqual(
+            start.headers["Location"],
+            "https://accounts.google.com/o/oauth2/v2/auth",
+        )
+
+        callback = self.client.get("/auth/callback?code=google-auth-code")
+        self.assertEqual(callback.status_code, 302)
+        self.assertEqual(callback.headers["Location"], "/dashboard")
+        db.start_oauth.assert_called_once_with(
+            "google", "http://localhost/auth/callback"
+        )
+        db.exchange_auth_code.assert_called_once_with(
+            "google-auth-code", "pkce-test-verifier"
+        )
 
     def test_invitation_confirmation_redirects_to_password_setup(self):
         response = self.client.get(

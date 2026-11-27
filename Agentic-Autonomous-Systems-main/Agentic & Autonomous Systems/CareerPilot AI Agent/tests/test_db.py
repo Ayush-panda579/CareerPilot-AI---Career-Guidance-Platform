@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -117,6 +118,89 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(context["session"].access_token, "renewed-access")
         self.assertEqual(context["session"].refresh_token, "renewed-refresh")
         client.postgrest.auth.assert_called_once_with("renewed-access")
+
+    def test_start_oauth_returns_url_and_pkce_verifier(self):
+        storage = Mock()
+        storage.get_item.return_value = "secure-pkce-verifier"
+        auth = SimpleNamespace(
+            sign_in_with_oauth=Mock(
+                return_value=SimpleNamespace(url="https://supabase.test/authorize")
+            ),
+            _storage=storage,
+            _storage_key="supabase.auth.token",
+        )
+        client = SimpleNamespace(auth=auth)
+        with patch.object(db, "get_client", return_value=client):
+            result = db.start_oauth("google", "https://app.test/auth/callback")
+
+        self.assertEqual(result, ("https://supabase.test/authorize", "secure-pkce-verifier"))
+        auth.sign_in_with_oauth.assert_called_once_with(
+            {
+                "provider": "google",
+                "options": {"redirect_to": "https://app.test/auth/callback"},
+            }
+        )
+        storage.get_item.assert_called_once_with("supabase.auth.token-code-verifier")
+
+    def test_exchange_auth_code_uses_pkce_verifier(self):
+        auth = SimpleNamespace(
+            exchange_code_for_session=Mock(
+                return_value=SimpleNamespace(
+                    user=SimpleNamespace(id="user-id"),
+                    session=SimpleNamespace(
+                        access_token="access-token",
+                        refresh_token="refresh-token",
+                        expires_in=3600,
+                    ),
+                )
+            )
+        )
+        with patch.object(db, "get_client", return_value=SimpleNamespace(auth=auth)):
+            result = db.exchange_auth_code("auth-code", "pkce-verifier")
+
+        self.assertEqual(result.session.access_token, "access-token")
+        auth.exchange_code_for_session.assert_called_once_with(
+            {"auth_code": "auth-code", "code_verifier": "pkce-verifier"}
+        )
+
+    def test_admin_directory_projects_safe_account_fields(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "users": [{
+                        "email": "member@example.test",
+                        "password": "must-not-be-returned",
+                        "user_metadata": {"display_name": "Member"},
+                        "app_metadata": {"provider": "google", "role": "member"},
+                        "email_confirmed_at": "2026-11-27T09:00:00+00:00",
+                        "created_at": "2026-11-27T08:00:00+00:00",
+                        "last_sign_in_at": None,
+                    }]
+                }).encode()
+
+        with (
+            patch.dict(os.environ, {
+                "SUPABASE_URL": "https://project.supabase.co",
+                "SUPABASE_SERVICE_ROLE_KEY": "server-only-key",
+                "PLACEMENTCARE_ADMIN_EMAILS": "member@example.test",
+            }),
+            patch("db.urllib.request.urlopen", return_value=FakeResponse()) as urlopen,
+        ):
+            directory = db.get_admin_user_directory()
+
+        self.assertEqual(len(directory["accounts"]), 1)
+        account = directory["accounts"][0]
+        self.assertEqual(account["email"], "member@example.test")
+        self.assertEqual(account["provider"], "google")
+        self.assertEqual(account["role"], "admin")
+        self.assertNotIn("password", account)
+        urlopen.assert_called_once()
 
     def test_missing_auth_cookies_does_not_create_a_client(self):
         with patch.object(db, "get_client") as get_client:

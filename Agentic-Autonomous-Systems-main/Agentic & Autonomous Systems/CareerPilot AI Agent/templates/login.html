@@ -10,6 +10,12 @@
     .auth-card h1 { color: #142641; font-size: 1.8rem; font-weight: 750; letter-spacing: -.04em; }
     .auth-card .form-control { min-height: 48px; border-color: #dce3ec; border-radius: .7rem; }
     .auth-card .form-control:focus { border-color: #2b8d86; box-shadow: 0 0 0 .2rem rgba(43, 141, 134, .14); }
+    .auth-divider { display:flex; align-items:center; gap:.85rem; margin:1.25rem 0; color:#8b92a0; font-size:.82rem; }
+    .auth-divider::before,.auth-divider::after { content:""; height:1px; flex:1; background:#e6ebf2; }
+    .google-auth-button { display:flex; justify-content:center; align-items:center; gap:.7rem; min-height:48px; border:1px solid #dce3ec; border-radius:.7rem; background:#fff; color:#202124; font-weight:650; text-decoration:none; transition:background .2s ease,border-color .2s ease; }
+    .google-auth-button:hover { color:#202124; border-color:#b9c4d3; background:#f8fafc; }
+    .google-auth-button i { color:#4285f4; font-size:1.1rem; }
+    .auth-provider-note { color:#778094; font-size:.78rem; line-height:1.5; }
 </style>
 {% endblock %}
 
@@ -31,6 +37,13 @@
             </div>
             <button class="btn btn-gradient w-100 py-3" type="submit">Sign in</button>
         </form>
+
+        <div class="auth-divider" aria-hidden="true">or</div>
+        <a class="google-auth-button" href="{{ url_for('google_login') }}">
+            <i class="bi bi-google" aria-hidden="true"></i>
+            <span>Continue with Google</span>
+        </a>
+        <p class="auth-provider-note text-center mt-2 mb-0">Administrators must use a verified, pre-authorized Google account.</p>
 
         <p class="text-center text-secondary mt-4 mb-0">New to PlacementCare? <a href="{{ url_for('register') }}" class="fw-semibold">Create an account</a></p>
     </section>

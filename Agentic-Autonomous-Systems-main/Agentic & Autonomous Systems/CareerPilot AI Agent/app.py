@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -161,7 +162,40 @@ def apply_security_headers(response):
 
 def _user_is_admin(user):
     app_metadata = getattr(user, "app_metadata", None) or {}
-    return isinstance(app_metadata, dict) and app_metadata.get("role") == "admin"
+    if isinstance(app_metadata, dict) and app_metadata.get("role") == "admin":
+        return True
+
+    email = (getattr(user, "email", None) or "").strip().lower()
+    verified = bool(
+        getattr(user, "email_confirmed_at", None)
+        or getattr(user, "confirmed_at", None)
+    )
+    allowed_admins = {
+        address.strip().lower()
+        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
+        if address.strip()
+    }
+    if not email or email not in allowed_admins or not verified:
+        return False
+
+    providers = set()
+    if isinstance(app_metadata, dict):
+        provider = app_metadata.get("provider")
+        if isinstance(provider, str):
+            providers.add(provider.lower())
+        provider_list = app_metadata.get("providers") or []
+        if isinstance(provider_list, (list, tuple, set)):
+            providers.update(item.lower() for item in provider_list if isinstance(item, str))
+    identities = getattr(user, "identities", None) or []
+    for identity in identities:
+        provider = (
+            identity.get("provider")
+            if isinstance(identity, dict)
+            else getattr(identity, "provider", None)
+        )
+        if isinstance(provider, str):
+            providers.add(provider.lower())
+    return "google" in providers
 
 
 def login_required(view):
@@ -233,6 +267,19 @@ def _friendly_auth_error(error, action):
     if action == "register":
         return "We could not create the account. Check the information and try again."
     return "Unable to sign in with those credentials. Please check them and try again."
+
+
+def _auth_redirect_url():
+    redirect_url = os.getenv("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")
+    if redirect_url:
+        return redirect_url
+
+    deployment_host = os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL")
+    if IS_VERCEL and deployment_host:
+        return f"https://{deployment_host}/auth/callback"
+    if not IS_VERCEL:
+        return url_for("auth_callback", _external=True)
+    return None
 
 
 def _current_user_id():
@@ -352,15 +399,7 @@ def register():
             flash("Choose a password with at least 8 characters.", "warning")
             return render_template("register.html"), 400
 
-        redirect_url = os.getenv("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")
-        if not redirect_url:
-            deployment_host = (
-                os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL")
-            )
-            if IS_VERCEL and deployment_host:
-                redirect_url = f"https://{deployment_host}/auth/callback"
-            elif not IS_VERCEL:
-                redirect_url = url_for("auth_callback", _external=True)
+        redirect_url = _auth_redirect_url()
         if not redirect_url:
             flash("Email confirmation is not configured for this deployment.", "danger")
             return render_template("register.html"), 503
@@ -419,8 +458,39 @@ def login():
     return render_template("login.html")
 
 
+@app.route("/auth/google")
+def google_login():
+    if g.current_user is not None:
+        return redirect(url_for("dashboard"))
+    if _is_auth_rate_limited():
+        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+        return redirect(url_for("login"))
+
+    redirect_url = _auth_redirect_url()
+    if not redirect_url:
+        flash("Google sign-in is not configured for this deployment yet.", "warning")
+        return redirect(url_for("login"))
+
+    try:
+        oauth_url, code_verifier = db.start_oauth("google", redirect_url)
+    except Exception:
+        current_app.logger.exception("Could not start Google sign-in")
+        flash("Google sign-in is unavailable right now. Please try again later.", "warning")
+        return redirect(url_for("login"))
+
+    session["google_oauth_verifier"] = code_verifier
+    session["google_oauth_started_at"] = int(time.time())
+    return redirect(oauth_url)
+
+
 @app.route("/auth/callback")
 def auth_callback():
+    if request.args.get("error"):
+        session.pop("google_oauth_verifier", None)
+        session.pop("google_oauth_started_at", None)
+        flash("Google sign-in could not be completed. Please try again.", "warning")
+        return redirect(url_for("login"))
+
     token_hash = request.args.get("token_hash", "").strip()
     token_type = request.args.get("type", "signup").strip()
     code = request.args.get("code", "").strip()
@@ -436,13 +506,25 @@ def auth_callback():
                 token_type if token_type in allowed_types else "signup",
             )
         elif code:
-            result = db.exchange_auth_code(code)
+            code_verifier = session.pop("google_oauth_verifier", None)
+            started_at = session.pop("google_oauth_started_at", None)
+            if code_verifier:
+                try:
+                    is_expired = not started_at or time.time() - int(started_at) > 600
+                except (TypeError, ValueError):
+                    is_expired = True
+                if is_expired:
+                    flash("That Google sign-in link expired. Please try again.", "warning")
+                    return redirect(url_for("login"))
+                result = db.exchange_auth_code(code, code_verifier)
+            else:
+                result = db.exchange_auth_code(code)
         else:
             flash("That confirmation link is invalid or expired.", "warning")
             return redirect(url_for("login"))
     except Exception:
-        current_app.logger.exception("Supabase confirmation callback failed")
-        flash("That confirmation link is invalid or expired.", "warning")
+        current_app.logger.exception("Supabase authentication callback failed")
+        flash("Sign-in could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
 
     if not result.session:
@@ -453,7 +535,7 @@ def auth_callback():
     if token_type in {"invite", "recovery"}:
         flash("Your email link is confirmed. Set a password to continue.", "success")
         return redirect(url_for("set_password"))
-    flash("Email confirmed. Your account is ready.", "success")
+    flash("You are signed in. Your account is ready.", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -461,10 +543,39 @@ def auth_callback():
 @admin_required
 def admin_profile():
     metadata = getattr(g.current_user, "user_metadata", None) or {}
+    account_error = False
+    directory = {"accounts": [], "truncated": False}
+    try:
+        directory = db.get_admin_user_directory()
+    except Exception:
+        current_app.logger.exception("Could not load the admin account directory")
+        account_error = True
+
+    accounts = directory.get("accounts", [])
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    active_count = 0
+    for account in accounts:
+        last_sign_in = account.get("last_sign_in_at")
+        try:
+            last_sign_in_at = datetime.fromisoformat(last_sign_in.replace("Z", "+00:00"))
+            if last_sign_in_at.tzinfo is None:
+                last_sign_in_at = last_sign_in_at.replace(tzinfo=timezone.utc)
+            if last_sign_in_at >= recent_cutoff:
+                active_count += 1
+        except (AttributeError, TypeError, ValueError):
+            continue
+
     return render_template(
         "admin.html",
         admin_email=getattr(g.current_user, "email", ""),
         admin_name=metadata.get("display_name") or "PlacementCare Administrator",
+        accounts=accounts,
+        account_count=len(accounts),
+        verified_count=sum(1 for account in accounts if account.get("verified")),
+        admin_count=sum(1 for account in accounts if account.get("role") == "admin"),
+        active_count=active_count,
+        account_error=account_error,
+        account_truncated=directory.get("truncated", False),
     )
 
 

@@ -1,47 +1,148 @@
 {% extends 'base.html' %}
 
-{% block title %}Admin profile | PlacementCare{% endblock %}
+{% block title %}Admin overview | PlacementCare{% endblock %}
 
 {% block extra_css %}
 <style>
-    .admin-page { min-height: 62vh; padding: clamp(2rem, 6vw, 5rem) 0; background: linear-gradient(180deg, #f3f6fc 0%, #fff 100%); }
-    .admin-card { max-width: 760px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 1.4rem; background: #fff; box-shadow: 0 18px 52px rgba(19, 40, 72, .08); overflow: hidden; }
-    .admin-card-header { padding: clamp(1.5rem, 4vw, 2.5rem); color: #fff; background: linear-gradient(125deg, #142641, #334b72); }
-    .admin-card-body { padding: clamp(1.5rem, 4vw, 2.5rem); }
-    .admin-avatar { display: grid; place-items: center; width: 3.5rem; height: 3.5rem; border-radius: 1.1rem; background: rgba(255,255,255,.14); font-size: 1.4rem; }
-    .profile-label { color: #64748b; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-    .profile-value { color: #142641; font-weight: 650; overflow-wrap: anywhere; }
-    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+    .admin-page { min-height: 70vh; padding: clamp(1.5rem, 4vw, 3.5rem) 0; background: #f5f6fb; color: #191b2e; }
+    .admin-hero { position:relative; display:flex; align-items:center; justify-content:space-between; gap:2rem; overflow:hidden; padding:clamp(1.5rem,4vw,3rem); border-radius:1.5rem; background:linear-gradient(118deg,#191b34 0%,#302b5c 66%,#5846a5 100%); color:#fff; box-shadow:0 22px 50px rgba(35,31,78,.17); }
+    .admin-hero-copy { position:relative; z-index:1; max-width:650px; }
+    .admin-hero-kicker { color:#c9f58a; font-size:.74rem; font-weight:800; letter-spacing:.15em; text-transform:uppercase; }
+    .admin-hero h1 { margin:.65rem 0 .7rem; font-size:clamp(2rem,4vw,3.3rem); font-weight:820; letter-spacing:-.06em; }
+    .admin-hero p { max-width:600px; margin:0; color:#d4d3e1; line-height:1.7; }
+    .admin-art { flex:0 0 auto; width:min(24vw,230px); height:auto; border:1px solid rgba(255,255,255,.6); border-radius:1.2rem; box-shadow:0 15px 24px rgba(0,0,0,.2); transform:rotate(4deg); }
+    .admin-actions { display:flex; flex-wrap:wrap; gap:.65rem; margin-top:1.35rem; }
+    .admin-actions .btn { border-radius:999px; font-weight:700; }
+    .admin-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin:1.25rem 0; }
+    .metric-card,.admin-panel { border:1px solid #e6e8f0; border-radius:1.15rem; background:#fff; box-shadow:0 8px 24px rgba(32,34,64,.045); }
+    .metric-card { padding:1.2rem 1.25rem; }
+    .metric-label { color:#73778d; font-size:.77rem; font-weight:750; letter-spacing:.08em; text-transform:uppercase; }
+    .metric-value { margin:.45rem 0 0; color:#20213a; font-size:clamp(1.65rem,3vw,2.25rem); font-weight:820; letter-spacing:-.05em; }
+    .admin-panel { margin-top:1.25rem; padding:clamp(1rem,2.5vw,1.6rem); }
+    .panel-heading { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+    .panel-heading h2 { margin:0; font-size:1.3rem; font-weight:800; letter-spacing:-.03em; }
+    .panel-heading p { margin:.3rem 0 0; color:#73778d; font-size:.9rem; }
+    .account-search { width:min(100%,320px); min-height:44px; border-color:#dce2ed; border-radius:.75rem; }
+    .account-search:focus { border-color:#7464d2; box-shadow:0 0 0 .2rem rgba(116,100,210,.14); }
+    .account-table { min-width:720px; margin:0; }
+    .account-table thead th { padding:.85rem .7rem; border-bottom-color:#e6e8f0; color:#70758a; font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; }
+    .account-table tbody td { padding:.9rem .7rem; border-bottom-color:#eff0f5; vertical-align:middle; color:#44475e; font-size:.9rem; }
+    .account-name { display:block; color:#252640; font-weight:750; }
+    .account-email { display:block; margin-top:.2rem; color:#777b90; font-size:.8rem; overflow-wrap:anywhere; }
+    .account-pill { display:inline-flex; align-items:center; gap:.35rem; border-radius:999px; padding:.3rem .6rem; font-size:.73rem; font-weight:750; }
+    .account-pill.verified { color:#166534; background:#e8f7ec; }
+    .account-pill.pending { color:#8a5a08; background:#fff4d9; }
+    .account-pill.admin { color:#5645ae; background:#f0edff; }
+    .account-pill.member { color:#4b5870; background:#eef1f6; }
+    .admin-note { color:#6d7288; font-size:.84rem; }
+    .feature-shortcuts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.7rem; }
+    .feature-shortcut { display:flex; align-items:center; gap:.65rem; min-height:54px; padding:.75rem; border:1px solid #e8eaf1; border-radius:.8rem; color:#353650; background:#fff; font-size:.88rem; font-weight:700; text-decoration:none; transition:transform .18s ease,border-color .18s ease; }
+    .feature-shortcut:hover { transform:translateY(-2px); border-color:#bdb5f0; color:#5749ac; }
+    .feature-shortcut i { color:#6858c6; font-size:1rem; }
+    @media(max-width:900px) { .admin-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.feature-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}.admin-art{width:min(28vw,190px)} }
+    @media(max-width:575px) { .admin-hero{align-items:flex-start}.admin-art{position:absolute;right:-1.3rem;bottom:-1rem;width:145px;opacity:.32}.admin-hero-copy{max-width:100%}.admin-metrics{gap:.65rem}.metric-card{padding:1rem}.feature-shortcuts{grid-template-columns:1fr}.panel-heading{align-items:stretch}.account-search{width:100%} }
+    @media(prefers-reduced-motion:reduce) { .feature-shortcut{transition:none}.feature-shortcut:hover{transform:none} }
 </style>
 {% endblock %}
 
 {% block content %}
 <main class="admin-page">
-    <div class="container px-3">
-        <section class="admin-card" aria-labelledby="admin-title">
-            <div class="admin-card-header d-flex align-items-center gap-3">
-                <div class="admin-avatar" aria-hidden="true"><i class="bi bi-shield-lock"></i></div>
+    <div class="container">
+        <header class="admin-hero" aria-labelledby="admin-title">
+            <div class="admin-hero-copy">
+                <p class="admin-hero-kicker mb-0">PlacementCare · Admin workspace</p>
+                <h1 id="admin-title">Platform overview</h1>
+                <p>Welcome, {{ admin_name }}. Review account health, recent access, and the tools available across the platform.</p>
+                <div class="admin-actions">
+                    <a class="btn btn-light" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2 me-1" aria-hidden="true"></i>Open workspace</a>
+                    <a class="btn btn-outline-light" href="{{ url_for('set_password') }}"><i class="bi bi-key me-1" aria-hidden="true"></i>Security settings</a>
+                </div>
+            </div>
+            <img class="admin-art" src="{{ url_for('static', filename='images/career-growth-sculpture.png') }}" alt="" aria-hidden="true" width="1408" height="1024" loading="lazy">
+        </header>
+
+        <section class="admin-metrics" aria-label="Account metrics">
+            <article class="metric-card"><div class="metric-label">Accounts</div><p class="metric-value">{{ account_count }}</p></article>
+            <article class="metric-card"><div class="metric-label">Verified email</div><p class="metric-value">{{ verified_count }}</p></article>
+            <article class="metric-card"><div class="metric-label">Active in 30 days</div><p class="metric-value">{{ active_count }}</p></article>
+            <article class="metric-card"><div class="metric-label">Administrators</div><p class="metric-value">{{ admin_count }}</p></article>
+        </section>
+
+        <section class="admin-panel" aria-labelledby="accounts-title">
+            <div class="panel-heading">
                 <div>
-                    <p class="text-white-50 text-uppercase small fw-semibold mb-1">PlacementCare account</p>
-                    <h1 class="h3 mb-0" id="admin-title">Administrator profile</h1>
+                    <h2 id="accounts-title">Account directory</h2>
+                    <p>Account identity, sign-in provider, verification, and recent access.</p>
+                </div>
+                <div>
+                    <label class="visually-hidden" for="account-search">Search accounts by name or email</label>
+                    <input class="form-control account-search" id="account-search" type="search" placeholder="Search name or email" autocomplete="off">
                 </div>
             </div>
-            <div class="admin-card-body">
-                <p class="text-secondary mb-4">Admin access is enabled for this verified account.</p>
-                <dl class="row gy-3 mb-4">
-                    <div class="col-12 col-sm-4"><dt class="profile-label">Profile name</dt></div>
-                    <div class="col-12 col-sm-8"><dd class="profile-value mb-0">{{ admin_name }}</dd></div>
-                    <div class="col-12 col-sm-4"><dt class="profile-label">Username</dt></div>
-                    <div class="col-12 col-sm-8"><dd class="profile-value mb-0">{{ admin_email }}</dd></div>
-                    <div class="col-12 col-sm-4"><dt class="profile-label">Access</dt></div>
-                    <div class="col-12 col-sm-8"><dd class="mb-0"><span class="badge rounded-pill text-bg-success">Administrator</span></dd></div>
-                </dl>
-                <div class="d-flex flex-wrap gap-2">
-                    <a class="btn btn-primary" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2 me-1" aria-hidden="true"></i>Open workspace</a>
-                    <a class="btn btn-outline-secondary" href="{{ url_for('set_password') }}"><i class="bi bi-key me-1" aria-hidden="true"></i>Change password</a>
-                </div>
+
+            {% if account_error %}
+            <div class="alert alert-warning" role="status">The account directory is temporarily unavailable. Please try again later.</div>
+            {% endif %}
+            {% if account_truncated %}
+            <div class="alert alert-info" role="status">The directory reached its display limit. Contact the project owner to review additional accounts.</div>
+            {% endif %}
+
+            <div class="table-responsive">
+                <table class="table account-table align-middle">
+                    <caption class="visually-hidden">PlacementCare user accounts and authentication status</caption>
+                    <thead><tr><th scope="col">Account</th><th scope="col">Provider</th><th scope="col">Email status</th><th scope="col">Access</th><th scope="col">Joined</th><th scope="col">Last sign-in</th></tr></thead>
+                    <tbody id="account-table-body">
+                        {% for account in accounts %}
+                        <tr data-account-row data-search="{{ account.display_name }} {{ account.email }}">
+                            <td><span class="account-name">{{ account.display_name }}</span><span class="account-email">{{ account.email or 'Email unavailable' }}</span></td>
+                            <td class="text-capitalize">{{ account.provider }}</td>
+                            <td><span class="account-pill {{ 'verified' if account.verified else 'pending' }}">{{ 'Verified' if account.verified else 'Pending' }}</span></td>
+                            <td><span class="account-pill {{ 'admin' if account.role == 'admin' else 'member' }}">{{ 'Admin' if account.role == 'admin' else 'Member' }}</span></td>
+                            <td>{{ account.created_at[:10] if account.created_at else '—' }}</td>
+                            <td>{{ account.last_sign_in_at[:16].replace('T', ' ') if account.last_sign_in_at else 'Never' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6" class="py-4 text-center text-secondary">{% if account_error %}Account data could not be loaded.{% else %}No accounts are registered yet.{% endif %}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </div>
+            <p id="account-filter-status" class="admin-note mb-0" aria-live="polite">Showing {{ account_count }} account{{ '' if account_count == 1 else 's' }}.</p>
+            <p class="admin-note mt-3 mb-0">Passwords are never displayed or retrievable, including by administrators. This directory contains account metadata only.</p>
+        </section>
+
+        <section class="admin-panel" aria-labelledby="features-title">
+            <div class="panel-heading"><div><h2 id="features-title">Platform tools</h2><p>Quick access to the PlacementCare user experience.</p></div></div>
+            <nav class="feature-shortcuts" aria-label="Platform feature shortcuts">
+                <a class="feature-shortcut" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2" aria-hidden="true"></i>Career dashboard</a>
+                <a class="feature-shortcut" href="{{ url_for('roadmap') }}"><i class="bi bi-signpost-split" aria-hidden="true"></i>Career roadmap</a>
+                <a class="feature-shortcut" href="{{ url_for('careers') }}"><i class="bi bi-compass" aria-hidden="true"></i>Career paths</a>
+                <a class="feature-shortcut" href="{{ url_for('upload') }}"><i class="bi bi-file-earmark-person" aria-hidden="true"></i>Resume workspace</a>
+                <a class="feature-shortcut" href="{{ url_for('chatbot') }}"><i class="bi bi-chat-square-heart" aria-hidden="true"></i>AI career mentor</a>
+                <a class="feature-shortcut" href="{{ url_for('content_page', slug='skill-extractor') }}"><i class="bi bi-stars" aria-hidden="true"></i>Skill insights</a>
+                <a class="feature-shortcut" href="{{ url_for('content_page', slug='interview-prep') }}"><i class="bi bi-mic" aria-hidden="true"></i>Interview prep</a>
+                <a class="feature-shortcut" href="{{ url_for('content_page', slug='learning-hub') }}"><i class="bi bi-journal-check" aria-hidden="true"></i>Learning hub</a>
+            </nav>
         </section>
     </div>
 </main>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const accountSearch = document.getElementById("account-search");
+    const accountRows = Array.from(document.querySelectorAll("[data-account-row]"));
+    const accountFilterStatus = document.getElementById("account-filter-status");
+
+    accountSearch?.addEventListener("input", () => {
+        const query = accountSearch.value.trim().toLocaleLowerCase();
+        let visibleCount = 0;
+        accountRows.forEach((row) => {
+            const matches = row.dataset.search.toLocaleLowerCase().includes(query);
+            row.hidden = !matches;
+            if (matches) visibleCount += 1;
+        });
+        accountFilterStatus.textContent = `Showing ${visibleCount} of {{ account_count }} accounts.`;
+    });
+</script>
 {% endblock %}
