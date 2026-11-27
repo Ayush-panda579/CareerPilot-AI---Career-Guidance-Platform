@@ -41,6 +41,16 @@
     .auth-shell { width: min(100%, 520px); grid-template-columns: 1fr; border-radius: 22px; }
     .auth-art { display: none; }
     .auth-form-panel { padding: clamp(1.5rem, 5vw, 3rem); }
+    @media (max-height: 650px) {
+        .auth-page { min-height: 0; padding-block: .5rem; align-items: flex-start; }
+        .auth-form-panel { padding-block: .5rem; }
+        .auth-intro { margin-bottom: 1rem; }
+        .auth-form-content .form-control, .auth-submit, .google-signin { min-height: 44px; }
+        .auth-form-content form .mb-3, .auth-form-content form .mb-4 { margin-bottom: .65rem !important; }
+        .auth-divider { margin-top: .55rem; }
+        .google-signin { margin-top: .45rem; }
+        .auth-switch { margin-top: .75rem; }
+    }
 {% endblock %}
 
 {% block content %}
