@@ -57,6 +57,24 @@ class FlaskSmokeTests(unittest.TestCase):
             patch.object(db, "authenticate_session", return_value=self.auth_context),
             patch.object(db, "sign_up", return_value=db.AuthResult(None, None)),
             patch.object(db, "sign_in", return_value=self.auth_result),
+            patch.object(
+                db,
+                "start_oauth",
+                return_value=("https://accounts.google.com/o/oauth2/v2/auth", "pkce-test-verifier"),
+            ),
+            patch.object(db, "exchange_auth_code", return_value=self.auth_result),
+            patch.object(db, "get_admin_user_directory", return_value={
+                "accounts": [{
+                    "email": "smoke-user@example.test",
+                    "display_name": "Smoke User",
+                    "provider": "email",
+                    "verified": True,
+                    "role": "member",
+                    "created_at": "2026-11-27T08:00:00+00:00",
+                    "last_sign_in_at": "2026-11-27T09:00:00+00:00",
+                }],
+                "truncated": False,
+            }),
             patch.object(db, "sign_out"),
             patch.object(db, "update_password"),
             patch.object(
@@ -76,6 +94,37 @@ class FlaskSmokeTests(unittest.TestCase):
             patch.object(db, "create_contact_message"),
             patch.object(db, "create_resume_upload", return_value={"id": "resume-id"}),
             patch.object(db, "update_resume_upload_status", return_value=True),
+            patch.object(db, "update_resume_analysis", return_value=True),
+            patch.object(
+                db,
+                "get_resume_upload",
+                return_value={
+                    "id": "resume-id",
+                    "original_filename": "resume.pdf",
+                    "status": "ready",
+                    "analysis": {
+                        "summary": {
+                            "word_count": 75,
+                            "skills_found": 1,
+                            "contact_details": {
+                                "name_or_heading": "Jordan Lee",
+                                "email": "jordan@example.test",
+                                "phone": None,
+                            },
+                            "sections_found": ["Experience"],
+                        },
+                        "skills": ["Python"],
+                        "job_matches": [],
+                        "learning_resources": [],
+                        "notice": "Indicative keyword match.",
+                    },
+                },
+            ),
+            patch.object(
+                app_module,
+                "extract_resume_text",
+                return_value="Jordan Lee\nEmail: jordan@example.test\nPython SQL Git and Flask experience. " * 2,
+            ),
             patch.object(db, "create_learning_progress", return_value={"id": "goal-id"}),
             patch.object(db, "update_learning_progress", return_value={"id": "goal-id"}),
             patch.object(db, "delete_learning_progress", return_value=True),
@@ -100,9 +149,8 @@ class FlaskSmokeTests(unittest.TestCase):
         for route in (
             "/", "/features", "/roadmap", "/careers", "/contact", "/about",
             "/register", "/login", "/resume-analyzer", "/skill-extractor",
-            "/ai-mentor", "/job-matcher", "/resources", "/blog",
+            "/ai-mentor", "/job-matcher", "/blog",
             "/learning-hub", "/interview-prep", "/help-center",
-            "/privacy-policy", "/terms",
         ):
             with self.subTest(route=route):
                 self.assertEqual(self.client.get(route).status_code, 200)
@@ -114,6 +162,9 @@ class FlaskSmokeTests(unittest.TestCase):
         favicon = self.client.get("/favicon.ico", follow_redirects=True, buffered=True)
         self.assertEqual(favicon.status_code, 200)
         favicon.close()
+        self.assertEqual(self.client.get("/resources").status_code, 404)
+        self.assertEqual(self.client.get("/privacy-policy").status_code, 404)
+        self.assertEqual(self.client.get("/terms").status_code, 404)
         self.assertEqual(self.client.get("/missing-page").status_code, 404)
 
     def test_vercel_entrypoint_and_rewrite_configuration(self):
@@ -198,6 +249,7 @@ class FlaskSmokeTests(unittest.TestCase):
         self.assertEqual(self.client.get("/dashboard").status_code, 302)
         self.assertEqual(self.client.get("/upload").status_code, 302)
         self.assertEqual(self.client.get("/chatbot").status_code, 302)
+        self.assertEqual(self.client.get("/resumes/resume-id").status_code, 302)
         self.assertEqual(self.client.get("/api/realtime/session").status_code, 401)
 
         login = self._sign_in()
@@ -205,6 +257,13 @@ class FlaskSmokeTests(unittest.TestCase):
         self.assertEqual(self.client.get("/dashboard").status_code, 200)
         self.assertEqual(self.client.get("/upload").status_code, 200)
         self.assertEqual(self.client.get("/chatbot").status_code, 200)
+        private_analysis = self.client.get("/resumes/resume-id")
+        self.assertEqual(private_analysis.status_code, 200)
+        self.assertIn(b"Your resume analysis", private_analysis.data)
+        self.assertIn(b"Jordan Lee", private_analysis.data)
+        db.get_resume_upload.assert_called_with(
+            self.auth_context["client"], self.user.id, "resume-id"
+        )
 
         realtime = self.client.get("/api/realtime/session")
         self.assertEqual(realtime.status_code, 200)
@@ -271,11 +330,10 @@ class FlaskSmokeTests(unittest.TestCase):
             content_type="multipart/form-data",
         )
         self.assertEqual(valid.status_code, 302)
-        self.assertIn("/dashboard", valid.headers["Location"])
+        self.assertIn("/resumes/resume-id", valid.headers["Location"])
         db.create_resume_upload.assert_called_once()
-        db.update_resume_upload_status.assert_called_once_with(
-            self.auth_context["client"], self.user.id, "resume-id", "ready"
-        )
+        db.update_resume_analysis.assert_called_once()
+        self.assertEqual(db.update_resume_upload_status.call_args.args[-1], "ready")
         uploaded_files = list(Path(app_module.app.config["UPLOAD_FOLDER"]).iterdir())
         self.assertEqual(len(uploaded_files), 1)
 
@@ -319,8 +377,97 @@ class FlaskSmokeTests(unittest.TestCase):
         self.user.app_metadata = {"role": "admin"}
         response = self.client.get("/admin")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Administrator profile", response.data)
+        self.assertIn(b"Platform overview", response.data)
         self.assertIn(b"smoke-user@example.test", response.data)
+        self.assertIn(b"Passwords are never displayed", response.data)
+        self.assertNotIn(b"test-password", response.data)
+        db.get_admin_user_directory.assert_called_once_with()
+
+    def test_google_allowlist_requires_a_verified_google_identity(self):
+        self.user.email = "admin@placementcare.in"
+        self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+        self.user.app_metadata = {"provider": "google", "providers": ["google"]}
+        with patch.dict(os.environ, {"PLACEMENTCARE_ADMIN_EMAILS": "admin@placementcare.in"}):
+            self.assertTrue(app_module._user_is_admin(self.user))
+            self.user.email_confirmed_at = None
+            self.assertFalse(app_module._user_is_admin(self.user))
+            self.user.email_confirmed_at = "2026-11-27T09:00:00+00:00"
+            self.user.app_metadata = {"provider": "email", "providers": ["email"]}
+            self.assertFalse(app_module._user_is_admin(self.user))
+
+    def test_auth_redirect_uses_production_domain_on_vercel(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "production",
+                "VERCEL_PROJECT_PRODUCTION_URL": "placementcare.example",
+                "VERCEL_URL": "preview-deployment.vercel.app",
+                "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "https://dev-proxy.example/auth/callback",
+            },
+        ):
+            self.assertEqual(
+                app_module._auth_redirect_url(),
+                "https://placementcare.example/auth/callback",
+            )
+
+    def test_auth_redirect_falls_back_to_vercel_url_in_production(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "production",
+                "VERCEL_PROJECT_PRODUCTION_URL": "",
+                "VERCEL_URL": "production-deployment.vercel.app",
+            },
+        ):
+            self.assertEqual(
+                app_module._auth_redirect_url(),
+                "https://production-deployment.vercel.app/auth/callback",
+            )
+
+    def test_auth_redirect_uses_preview_deployment_on_vercel(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "preview",
+                "VERCEL_PROJECT_PRODUCTION_URL": "placementcare.example",
+                "VERCEL_URL": "preview-deployment.vercel.app",
+                "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "https://dev-proxy.example/auth/callback",
+            },
+        ):
+            self.assertEqual(
+                app_module._auth_redirect_url(),
+                "https://preview-deployment.vercel.app/auth/callback",
+            )
+
+    def test_auth_redirect_requires_vercel_host_when_deployed(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "preview",
+                "VERCEL_PROJECT_PRODUCTION_URL": "",
+                "VERCEL_URL": "",
+                "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "https://dev-proxy.example/auth/callback",
+            },
+        ):
+            self.assertIsNone(app_module._auth_redirect_url())
+
+    def test_google_sign_in_round_trips_pkce_verifier(self):
+        start = self.client.get("/auth/google")
+        self.assertEqual(start.status_code, 302)
+        self.assertEqual(
+            start.headers["Location"],
+            "https://accounts.google.com/o/oauth2/v2/auth",
+        )
+
+        callback = self.client.get("/auth/callback?code=google-auth-code")
+        self.assertEqual(callback.status_code, 302)
+        self.assertEqual(callback.headers["Location"], "/dashboard")
+        db.start_oauth.assert_called_once_with(
+            "google", "http://localhost/auth/callback"
+        )
+        db.exchange_auth_code.assert_called_once_with(
+            "google-auth-code", "pkce-test-verifier"
+        )
 
     def test_invitation_confirmation_redirects_to_password_setup(self):
         response = self.client.get(

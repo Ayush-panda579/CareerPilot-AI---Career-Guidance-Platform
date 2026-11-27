@@ -6,6 +6,7 @@ import secrets
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
@@ -38,6 +39,7 @@ from services.gemini_service import (
     GeminiServiceError,
     generate_ai_response,
 )
+from services.resume_analysis_service import analyze_resume, extract_resume_text
 
 
 app = Flask(__name__)
@@ -161,7 +163,40 @@ def apply_security_headers(response):
 
 def _user_is_admin(user):
     app_metadata = getattr(user, "app_metadata", None) or {}
-    return isinstance(app_metadata, dict) and app_metadata.get("role") == "admin"
+    if isinstance(app_metadata, dict) and app_metadata.get("role") == "admin":
+        return True
+
+    email = (getattr(user, "email", None) or "").strip().lower()
+    verified = bool(
+        getattr(user, "email_confirmed_at", None)
+        or getattr(user, "confirmed_at", None)
+    )
+    allowed_admins = {
+        address.strip().lower()
+        for address in os.getenv("PLACEMENTCARE_ADMIN_EMAILS", "").split(",")
+        if address.strip()
+    }
+    if not email or email not in allowed_admins or not verified:
+        return False
+
+    providers = set()
+    if isinstance(app_metadata, dict):
+        provider = app_metadata.get("provider")
+        if isinstance(provider, str):
+            providers.add(provider.lower())
+        provider_list = app_metadata.get("providers") or []
+        if isinstance(provider_list, (list, tuple, set)):
+            providers.update(item.lower() for item in provider_list if isinstance(item, str))
+    identities = getattr(user, "identities", None) or []
+    for identity in identities:
+        provider = (
+            identity.get("provider")
+            if isinstance(identity, dict)
+            else getattr(identity, "provider", None)
+        )
+        if isinstance(provider, str):
+            providers.add(provider.lower())
+    return "google" in providers
 
 
 def login_required(view):
@@ -235,6 +270,25 @@ def _friendly_auth_error(error, action):
     return "Unable to sign in with those credentials. Please check them and try again."
 
 
+def _auth_redirect_url():
+    if IS_VERCEL:
+        production_host = os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
+        if os.getenv("VERCEL_ENV") == "production":
+            deployment_host = production_host or os.getenv("VERCEL_URL")
+        else:
+            deployment_host = os.getenv("VERCEL_URL") or production_host
+        return (
+            f"https://{deployment_host}/auth/callback"
+            if deployment_host
+            else None
+        )
+
+    redirect_url = os.getenv("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")
+    if redirect_url:
+        return redirect_url
+    return url_for("auth_callback", _external=True)
+
+
 def _current_user_id():
     return str(g.current_user.id)
 
@@ -280,13 +334,10 @@ def content_page(slug):
         "skill-extractor": ("Skill Extractor", "Make your strengths easier to see. Start with your resume and build a clearer picture of the skills you can bring to your next role.", "upload", "Upload a resume", ["Surface core strengths", "Spot skills to develop", "Connect skills to career paths"]),
         "ai-mentor": ("AI Mentor", "Get thoughtful support for career decisions, interview practice, and your next professional move.", "chatbot", "Talk to your mentor", ["Career questions, answered", "Interview practice prompts", "Practical next steps"]),
         "job-matcher": ("Job Matcher", "Explore career directions that align with your interests and strengths. Start with the career paths library and use your roadmap to plan what comes next.", "careers", "Explore career paths", ["Browse role families", "Understand common skills", "Build a personal learning plan"]),
-        "resources": ("Career resources", "A growing collection of practical guides to help you make confident career decisions.", "roadmap", "Explore your roadmap", ["Career planning guides", "Resume and interview advice", "Skill-building ideas"]),
         "blog": ("The PlacementCare journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
         "learning-hub": ("Learning hub", "Turn a big goal into small, trackable steps. Your learning plan is saved to your account and updates live across sessions.", "dashboard", "Open your dashboard", ["Create learning goals", "Track completed milestones", "See progress update in real time"]),
         "interview-prep": ("Interview prep", "Practice the moments that matter, from your opening story to the questions you want to ask.", "chatbot", "Practice with your AI mentor", ["Structure concise answers", "Prepare thoughtful questions", "Build confidence through practice"]),
         "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the PlacementCare team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
-        "privacy-policy": ("Privacy policy", "PlacementCare is built to keep your career workspace personal. Account data and saved career materials are scoped to your signed-in account through Supabase Row Level Security. Uploaded resumes are handled by the configured private storage service. We do not sell your personal information. Contact us to ask about your data or privacy.", "contact", "Privacy questions", []),
-        "terms": ("Terms of use", "PlacementCare provides career planning and educational guidance to support your decisions. AI-generated suggestions are informational and are not a guarantee of employment, hiring outcomes, or professional advice. You are responsible for reviewing and verifying recommendations before acting on them. Use the service lawfully and keep your account credentials secure.", "contact", "Contact us", []),
     }
     page = pages.get(slug)
     if page is None:
@@ -352,15 +403,7 @@ def register():
             flash("Choose a password with at least 8 characters.", "warning")
             return render_template("register.html"), 400
 
-        redirect_url = os.getenv("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")
-        if not redirect_url:
-            deployment_host = (
-                os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL")
-            )
-            if IS_VERCEL and deployment_host:
-                redirect_url = f"https://{deployment_host}/auth/callback"
-            elif not IS_VERCEL:
-                redirect_url = url_for("auth_callback", _external=True)
+        redirect_url = _auth_redirect_url()
         if not redirect_url:
             flash("Email confirmation is not configured for this deployment.", "danger")
             return render_template("register.html"), 503
@@ -419,8 +462,39 @@ def login():
     return render_template("login.html")
 
 
+@app.route("/auth/google")
+def google_login():
+    if g.current_user is not None:
+        return redirect(url_for("dashboard"))
+    if _is_auth_rate_limited():
+        flash("Too many authentication attempts. Wait a few minutes and try again.", "warning")
+        return redirect(url_for("login"))
+
+    redirect_url = _auth_redirect_url()
+    if not redirect_url:
+        flash("Google sign-in is not configured for this deployment yet.", "warning")
+        return redirect(url_for("login"))
+
+    try:
+        oauth_url, code_verifier = db.start_oauth("google", redirect_url)
+    except Exception:
+        current_app.logger.exception("Could not start Google sign-in")
+        flash("Google sign-in is unavailable right now. Please try again later.", "warning")
+        return redirect(url_for("login"))
+
+    session["google_oauth_verifier"] = code_verifier
+    session["google_oauth_started_at"] = int(time.time())
+    return redirect(oauth_url)
+
+
 @app.route("/auth/callback")
 def auth_callback():
+    if request.args.get("error"):
+        session.pop("google_oauth_verifier", None)
+        session.pop("google_oauth_started_at", None)
+        flash("Google sign-in could not be completed. Please try again.", "warning")
+        return redirect(url_for("login"))
+
     token_hash = request.args.get("token_hash", "").strip()
     token_type = request.args.get("type", "signup").strip()
     code = request.args.get("code", "").strip()
@@ -436,13 +510,25 @@ def auth_callback():
                 token_type if token_type in allowed_types else "signup",
             )
         elif code:
-            result = db.exchange_auth_code(code)
+            code_verifier = session.pop("google_oauth_verifier", None)
+            started_at = session.pop("google_oauth_started_at", None)
+            if code_verifier:
+                try:
+                    is_expired = not started_at or time.time() - int(started_at) > 600
+                except (TypeError, ValueError):
+                    is_expired = True
+                if is_expired:
+                    flash("That Google sign-in link expired. Please try again.", "warning")
+                    return redirect(url_for("login"))
+                result = db.exchange_auth_code(code, code_verifier)
+            else:
+                result = db.exchange_auth_code(code)
         else:
             flash("That confirmation link is invalid or expired.", "warning")
             return redirect(url_for("login"))
     except Exception:
-        current_app.logger.exception("Supabase confirmation callback failed")
-        flash("That confirmation link is invalid or expired.", "warning")
+        current_app.logger.exception("Supabase authentication callback failed")
+        flash("Sign-in could not be completed. Please try again.", "warning")
         return redirect(url_for("login"))
 
     if not result.session:
@@ -453,7 +539,7 @@ def auth_callback():
     if token_type in {"invite", "recovery"}:
         flash("Your email link is confirmed. Set a password to continue.", "success")
         return redirect(url_for("set_password"))
-    flash("Email confirmed. Your account is ready.", "success")
+    flash("You are signed in. Your account is ready.", "success")
     return redirect(url_for("dashboard"))
 
 
@@ -461,10 +547,39 @@ def auth_callback():
 @admin_required
 def admin_profile():
     metadata = getattr(g.current_user, "user_metadata", None) or {}
+    account_error = False
+    directory = {"accounts": [], "truncated": False}
+    try:
+        directory = db.get_admin_user_directory()
+    except Exception:
+        current_app.logger.exception("Could not load the admin account directory")
+        account_error = True
+
+    accounts = directory.get("accounts", [])
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    active_count = 0
+    for account in accounts:
+        last_sign_in = account.get("last_sign_in_at")
+        try:
+            last_sign_in_at = datetime.fromisoformat(last_sign_in.replace("Z", "+00:00"))
+            if last_sign_in_at.tzinfo is None:
+                last_sign_in_at = last_sign_in_at.replace(tzinfo=timezone.utc)
+            if last_sign_in_at >= recent_cutoff:
+                active_count += 1
+        except (AttributeError, TypeError, ValueError):
+            continue
+
     return render_template(
         "admin.html",
         admin_email=getattr(g.current_user, "email", ""),
         admin_name=metadata.get("display_name") or "PlacementCare Administrator",
+        accounts=accounts,
+        account_count=len(accounts),
+        verified_count=sum(1 for account in accounts if account.get("verified")),
+        admin_count=sum(1 for account in accounts if account.get("role") == "admin"),
+        active_count=active_count,
+        account_error=account_error,
+        account_truncated=directory.get("truncated", False),
     )
 
 
@@ -646,13 +761,26 @@ def upload():
             flash("Choose a resume file to upload.", "warning")
             return redirect(url_for("upload"))
         if not allowed_file(file.filename):
-            flash("Only PDF, DOC, or DOCX files are allowed.", "danger")
+            flash("Only PDF or DOCX resumes are supported for analysis.", "danger")
             return redirect(url_for("upload"))
 
         original_filename = secure_filename(file.filename)[:255]
         if not original_filename:
             flash("The selected filename is not valid.", "warning")
             return redirect(url_for("upload"))
+        try:
+            content = file.stream.read()
+            resume_text = extract_resume_text(original_filename, content)
+        except Exception:
+            current_app.logger.info("Could not extract text from uploaded resume", exc_info=True)
+            flash("We could not read this file. Please upload a text-based PDF or DOCX.", "warning")
+            return redirect(url_for("upload"))
+        finally:
+            file.stream.seek(0)
+        if len(resume_text.strip()) < 40:
+            flash("This resume has too little readable text to analyze. Try a text-based PDF or DOCX.", "warning")
+            return redirect(url_for("upload"))
+        analysis = analyze_resume(resume_text)
         storage_key = f"{uuid.uuid4()}_{original_filename}"
         user_id = _current_user_id()
 
@@ -686,18 +814,43 @@ def upload():
             return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB), 502
 
         try:
+            saved = db.update_resume_analysis(
+                g.supabase_client, user_id, resume["id"], analysis
+            )
+            if not saved:
+                raise RuntimeError("Resume analysis was not saved.")
             db.update_resume_upload_status(
                 g.supabase_client, user_id, resume["id"], "ready"
             )
         except Exception:
-            current_app.logger.exception("Could not update resume upload status")
-            flash("The file was uploaded, but its status could not be updated.", "warning")
+            current_app.logger.exception("Could not persist resume analysis")
+            db.update_resume_upload_status(
+                g.supabase_client, user_id, resume["id"], "failed"
+            )
+            flash("The resume was uploaded, but its analysis could not be saved.", "warning")
             return redirect(url_for("dashboard"))
 
-        flash("Resume uploaded successfully.", "success")
-        return redirect(url_for("dashboard"))
+        flash("Resume analyzed successfully.", "success")
+        return redirect(url_for("resume_result", resume_id=resume["id"]))
 
     return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB)
+
+
+@app.route("/resumes/<resume_id>")
+@login_required
+def resume_result(resume_id):
+    try:
+        resume = db.get_resume_upload(g.supabase_client, _current_user_id(), resume_id)
+    except Exception:
+        current_app.logger.exception("Could not load private resume analysis")
+        flash("Your resume analysis could not be loaded right now.", "warning")
+        return redirect(url_for("dashboard"))
+    if not resume:
+        return render_template("404.html"), 404
+    if not resume.get("analysis"):
+        flash("An analysis is not available for this resume yet.", "info")
+        return redirect(url_for("dashboard"))
+    return render_template("result.html", resume=resume, analysis=resume["analysis"])
 
 
 @app.route("/chatbot")

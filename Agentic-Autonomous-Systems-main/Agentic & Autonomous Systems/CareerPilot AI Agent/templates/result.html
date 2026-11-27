@@ -1,17 +1,89 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>CareerPilot Report</title>
-</head>
-<body>
+{% extends 'base.html' %}
 
-<h1>CareerPilot AI Report</h1>
+{% block title %}Resume analysis | PlacementCare{% endblock %}
 
-<pre>{{ report }}</pre>
+{% block extra_css %}
+<style>
+    .analysis-wrap { max-width: 1100px; }
+    .analysis-hero { background: linear-gradient(125deg, #11152b, #312b5d 68%, #276b73); color: white; border-radius: 1.25rem; padding: clamp(1.4rem, 4vw, 2.5rem); }
+    .analysis-card { border: 1px solid #e4e9f0; border-radius: 1rem; background: white; padding: clamp(1rem, 2.5vw, 1.5rem); height: 100%; }
+    .skill-chip { display: inline-flex; align-items: center; border-radius: 99px; padding: .4rem .7rem; margin: .2rem; background: #edf5f3; color: #155e55; font-size: .85rem; }
+    .match-score { font-size: 1.35rem; font-weight: 750; color: #176b5d; white-space: nowrap; }
+    .analysis-muted { color: #657286; }
+    .resource-row + .resource-row { border-top: 1px solid #e9edf2; }
+</style>
+{% endblock %}
 
-<br>
+{% block content %}
+<main class="container py-4 py-lg-5 analysis-wrap">
+    <section class="analysis-hero mb-4" aria-labelledby="analysis-title">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-end gap-3">
+            <div>
+                <p class="text-white-50 mb-2">PRIVATE RESUME REVIEW</p>
+                <h1 class="h2 mb-2" id="analysis-title">Your resume analysis</h1>
+                <p class="mb-0 text-white-50">{{ resume.original_filename }} · {{ analysis.summary.word_count }} readable words</p>
+            </div>
+            <a class="btn btn-light" href="{{ url_for('dashboard') }}">Back to dashboard</a>
+        </div>
+    </section>
 
-<a href="/">Back</a>
+    <section class="row g-3 mb-4" aria-label="Resume details">
+        <div class="col-12 col-lg-4"><article class="analysis-card">
+            <h2 class="h5">Contact details found</h2>
+            <dl class="mb-0">
+                <dt class="small analysis-muted mt-3">Top line</dt><dd>{{ analysis.summary.contact_details.name_or_heading or 'Not detected' }}</dd>
+                <dt class="small analysis-muted">Email</dt><dd>{{ analysis.summary.contact_details.email or 'Not detected' }}</dd>
+                <dt class="small analysis-muted">Phone</dt><dd class="mb-0">{{ analysis.summary.contact_details.phone or 'Not detected' }}</dd>
+            </dl>
+        </article></div>
+        <div class="col-12 col-lg-8"><article class="analysis-card">
+            <h2 class="h5">Resume structure</h2>
+            <p class="analysis-muted mb-2">Common sections detected in the text:</p>
+            {% if analysis.summary.sections_found %}
+                {% for section in analysis.summary.sections_found %}<span class="skill-chip">{{ section }}</span>{% endfor %}
+            {% else %}<p class="mb-0">No standard experience, education, or projects headings were detected.</p>{% endif %}
+            <p class="small analysis-muted mt-3 mb-0">This automated check looks for readable text and common headings; it does not judge your qualifications.</p>
+        </article></div>
+    </section>
 
-</body>
-</html>
+    <section class="analysis-card mb-4" aria-labelledby="skills-title">
+        <h2 class="h4" id="skills-title">Skills detected <span class="text-secondary">({{ analysis.summary.skills_found }})</span></h2>
+        {% if analysis.skills %}
+            <div class="mt-3">{% for skill in analysis.skills %}<span class="skill-chip">{{ skill }}</span>{% endfor %}</div>
+        {% else %}<p class="analysis-muted mb-0">We did not find a supported skill keyword in the readable resume text.</p>{% endif %}
+    </section>
+
+    <section class="mb-4" aria-labelledby="jobs-title">
+        <div class="d-flex justify-content-between align-items-end gap-3 mb-3">
+            <div><h2 class="h4 mb-1" id="jobs-title">Potential role matches</h2><p class="analysis-muted mb-0">Based on overlapping resume keywords and common role skills.</p></div>
+        </div>
+        {% if analysis.job_matches %}
+        <div class="row g-3">
+            {% for role in analysis.job_matches %}
+            <div class="col-12 col-lg-6"><article class="analysis-card">
+                <div class="d-flex justify-content-between align-items-start gap-3"><h3 class="h5">{{ role.title }}</h3><span class="match-score">{{ role.match_percent }}%</span></div>
+                <p class="small analysis-muted mb-2">Matched: {{ role.matched_skills|join(', ') }}</p>
+                {% if role.missing_skills %}<p class="small mb-3"><strong>Skills to build:</strong> {{ role.missing_skills|join(', ') }}</p>{% else %}<p class="small text-success mb-3">All listed baseline skills were found.</p>{% endif %}
+                <div class="d-flex flex-wrap gap-2"><a class="btn btn-sm btn-primary" href="{{ role.jobs_url }}" target="_blank" rel="noopener noreferrer">Search current jobs</a><a class="btn btn-sm btn-outline-secondary" href="{{ role.indeed_url }}" target="_blank" rel="noopener noreferrer">Indeed search</a></div>
+            </article></div>
+            {% endfor %}
+        </div>
+        {% else %}<div class="analysis-card"><p class="mb-0">There were not enough matching skill keywords to suggest a role. Add more detail about your experience, projects, and tools, then upload an updated resume.</p></div>{% endif %}
+    </section>
+
+    <section class="analysis-card mb-4" aria-labelledby="learning-title">
+        <h2 class="h4" id="learning-title">Learning links for skill gaps</h2>
+        <p class="analysis-muted">Suggestions are generated from skills missing in the role matches above.</p>
+        {% if analysis.learning_resources %}
+            {% for resource in analysis.learning_resources %}
+            <div class="resource-row py-3 d-flex flex-column flex-sm-row justify-content-between gap-2">
+                <strong>{{ resource.skill }}</strong>
+                <div class="d-flex flex-wrap gap-2"><a href="{{ resource.youtube_url }}" target="_blank" rel="noopener noreferrer">YouTube lessons</a><a href="{{ resource.coursera_url }}" target="_blank" rel="noopener noreferrer">Coursera courses</a></div>
+            </div>
+            {% endfor %}
+        {% else %}<p class="mb-0">No skill gaps were detected for the suggested roles.</p>{% endif %}
+    </section>
+
+    <p class="small analysis-muted">{{ analysis.notice }}</p>
+</main>
+{% endblock %}
