@@ -355,6 +355,62 @@ class FlaskSmokeTests(unittest.TestCase):
             self.user.app_metadata = {"provider": "email", "providers": ["email"]}
             self.assertFalse(app_module._user_is_admin(self.user))
 
+    def test_auth_redirect_uses_production_domain_on_vercel(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "production",
+                "VERCEL_PROJECT_PRODUCTION_URL": "placementcare.example",
+                "VERCEL_URL": "preview-deployment.vercel.app",
+                "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "https://dev-proxy.example/auth/callback",
+            },
+        ):
+            self.assertEqual(
+                app_module._auth_redirect_url(),
+                "https://placementcare.example/auth/callback",
+            )
+
+    def test_auth_redirect_falls_back_to_vercel_url_in_production(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "production",
+                "VERCEL_PROJECT_PRODUCTION_URL": "",
+                "VERCEL_URL": "production-deployment.vercel.app",
+            },
+        ):
+            self.assertEqual(
+                app_module._auth_redirect_url(),
+                "https://production-deployment.vercel.app/auth/callback",
+            )
+
+    def test_auth_redirect_uses_preview_deployment_on_vercel(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "preview",
+                "VERCEL_PROJECT_PRODUCTION_URL": "placementcare.example",
+                "VERCEL_URL": "preview-deployment.vercel.app",
+                "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "https://dev-proxy.example/auth/callback",
+            },
+        ):
+            self.assertEqual(
+                app_module._auth_redirect_url(),
+                "https://preview-deployment.vercel.app/auth/callback",
+            )
+
+    def test_auth_redirect_requires_vercel_host_when_deployed(self):
+        with patch.object(app_module, "IS_VERCEL", True), patch.dict(
+            os.environ,
+            {
+                "VERCEL_ENV": "preview",
+                "VERCEL_PROJECT_PRODUCTION_URL": "",
+                "VERCEL_URL": "",
+                "NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL": "https://dev-proxy.example/auth/callback",
+            },
+        ):
+            self.assertIsNone(app_module._auth_redirect_url())
+
     def test_google_sign_in_round_trips_pkce_verifier(self):
         start = self.client.get("/auth/google")
         self.assertEqual(start.status_code, 302)

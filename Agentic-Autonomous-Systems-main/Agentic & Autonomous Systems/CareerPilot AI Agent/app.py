@@ -270,16 +270,22 @@ def _friendly_auth_error(error, action):
 
 
 def _auth_redirect_url():
+    if IS_VERCEL:
+        production_host = os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
+        if os.getenv("VERCEL_ENV") == "production":
+            deployment_host = production_host or os.getenv("VERCEL_URL")
+        else:
+            deployment_host = os.getenv("VERCEL_URL") or production_host
+        return (
+            f"https://{deployment_host}/auth/callback"
+            if deployment_host
+            else None
+        )
+
     redirect_url = os.getenv("NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL")
     if redirect_url:
         return redirect_url
-
-    deployment_host = os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or os.getenv("VERCEL_URL")
-    if IS_VERCEL and deployment_host:
-        return f"https://{deployment_host}/auth/callback"
-    if not IS_VERCEL:
-        return url_for("auth_callback", _external=True)
-    return None
+    return url_for("auth_callback", _external=True)
 
 
 def _current_user_id():
