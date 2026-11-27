@@ -9,7 +9,7 @@
             <div class="card-modern p-4">
                 <h1 class="h3 text-center">Upload your resume</h1>
                 <p class="text-muted text-center">
-                    Choose a PDF, DOC, or DOCX file (maximum {{ max_upload_mb|default(5) }} MB).
+                    Choose a text-based PDF or DOCX file (maximum {{ max_upload_mb|default(5) }} MB). We&apos;ll identify resume details, skills, role matches, and learning resources privately.
                 </p>
 
                 <form action="{{ url_for('upload') }}"

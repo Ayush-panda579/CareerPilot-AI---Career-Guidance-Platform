@@ -39,6 +39,7 @@ from services.gemini_service import (
     GeminiServiceError,
     generate_ai_response,
 )
+from services.resume_analysis_service import analyze_resume, extract_resume_text
 
 
 app = Flask(__name__)
@@ -333,13 +334,10 @@ def content_page(slug):
         "skill-extractor": ("Skill Extractor", "Make your strengths easier to see. Start with your resume and build a clearer picture of the skills you can bring to your next role.", "upload", "Upload a resume", ["Surface core strengths", "Spot skills to develop", "Connect skills to career paths"]),
         "ai-mentor": ("AI Mentor", "Get thoughtful support for career decisions, interview practice, and your next professional move.", "chatbot", "Talk to your mentor", ["Career questions, answered", "Interview practice prompts", "Practical next steps"]),
         "job-matcher": ("Job Matcher", "Explore career directions that align with your interests and strengths. Start with the career paths library and use your roadmap to plan what comes next.", "careers", "Explore career paths", ["Browse role families", "Understand common skills", "Build a personal learning plan"]),
-        "resources": ("Career resources", "A growing collection of practical guides to help you make confident career decisions.", "roadmap", "Explore your roadmap", ["Career planning guides", "Resume and interview advice", "Skill-building ideas"]),
         "blog": ("The PlacementCare journal", "Ideas and practical guidance for building a career with intention.", "roadmap", "Start your roadmap", ["Career planning", "Job search strategies", "Learning habits"]),
         "learning-hub": ("Learning hub", "Turn a big goal into small, trackable steps. Your learning plan is saved to your account and updates live across sessions.", "dashboard", "Open your dashboard", ["Create learning goals", "Track completed milestones", "See progress update in real time"]),
         "interview-prep": ("Interview prep", "Practice the moments that matter, from your opening story to the questions you want to ask.", "chatbot", "Practice with your AI mentor", ["Structure concise answers", "Prepare thoughtful questions", "Build confidence through practice"]),
         "help-center": ("Help center", "Need a hand with your account or career workspace? Send a note and the PlacementCare team will get back to you.", "contact", "Contact support", ["Account and workspace help", "Resume upload guidance", "Product feedback"]),
-        "privacy-policy": ("Privacy policy", "PlacementCare is built to keep your career workspace personal. Account data and saved career materials are scoped to your signed-in account through Supabase Row Level Security. Uploaded resumes are handled by the configured private storage service. We do not sell your personal information. Contact us to ask about your data or privacy.", "contact", "Privacy questions", []),
-        "terms": ("Terms of use", "PlacementCare provides career planning and educational guidance to support your decisions. AI-generated suggestions are informational and are not a guarantee of employment, hiring outcomes, or professional advice. You are responsible for reviewing and verifying recommendations before acting on them. Use the service lawfully and keep your account credentials secure.", "contact", "Contact us", []),
     }
     page = pages.get(slug)
     if page is None:
@@ -763,13 +761,26 @@ def upload():
             flash("Choose a resume file to upload.", "warning")
             return redirect(url_for("upload"))
         if not allowed_file(file.filename):
-            flash("Only PDF, DOC, or DOCX files are allowed.", "danger")
+            flash("Only PDF or DOCX resumes are supported for analysis.", "danger")
             return redirect(url_for("upload"))
 
         original_filename = secure_filename(file.filename)[:255]
         if not original_filename:
             flash("The selected filename is not valid.", "warning")
             return redirect(url_for("upload"))
+        try:
+            content = file.stream.read()
+            resume_text = extract_resume_text(original_filename, content)
+        except Exception:
+            current_app.logger.info("Could not extract text from uploaded resume", exc_info=True)
+            flash("We could not read this file. Please upload a text-based PDF or DOCX.", "warning")
+            return redirect(url_for("upload"))
+        finally:
+            file.stream.seek(0)
+        if len(resume_text.strip()) < 40:
+            flash("This resume has too little readable text to analyze. Try a text-based PDF or DOCX.", "warning")
+            return redirect(url_for("upload"))
+        analysis = analyze_resume(resume_text)
         storage_key = f"{uuid.uuid4()}_{original_filename}"
         user_id = _current_user_id()
 
@@ -803,18 +814,43 @@ def upload():
             return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB), 502
 
         try:
+            saved = db.update_resume_analysis(
+                g.supabase_client, user_id, resume["id"], analysis
+            )
+            if not saved:
+                raise RuntimeError("Resume analysis was not saved.")
             db.update_resume_upload_status(
                 g.supabase_client, user_id, resume["id"], "ready"
             )
         except Exception:
-            current_app.logger.exception("Could not update resume upload status")
-            flash("The file was uploaded, but its status could not be updated.", "warning")
+            current_app.logger.exception("Could not persist resume analysis")
+            db.update_resume_upload_status(
+                g.supabase_client, user_id, resume["id"], "failed"
+            )
+            flash("The resume was uploaded, but its analysis could not be saved.", "warning")
             return redirect(url_for("dashboard"))
 
-        flash("Resume uploaded successfully.", "success")
-        return redirect(url_for("dashboard"))
+        flash("Resume analyzed successfully.", "success")
+        return redirect(url_for("resume_result", resume_id=resume["id"]))
 
     return render_template("upload.html", max_upload_mb=MAX_UPLOAD_MB)
+
+
+@app.route("/resumes/<resume_id>")
+@login_required
+def resume_result(resume_id):
+    try:
+        resume = db.get_resume_upload(g.supabase_client, _current_user_id(), resume_id)
+    except Exception:
+        current_app.logger.exception("Could not load private resume analysis")
+        flash("Your resume analysis could not be loaded right now.", "warning")
+        return redirect(url_for("dashboard"))
+    if not resume:
+        return render_template("404.html"), 404
+    if not resume.get("analysis"):
+        flash("An analysis is not available for this resume yet.", "info")
+        return redirect(url_for("dashboard"))
+    return render_template("result.html", resume=resume, analysis=resume["analysis"])
 
 
 @app.route("/chatbot")

@@ -1,265 +1,56 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
 
-{% block title %}
-CareerPilot AI Assistant
+{% block title %}CareerPilot AI Assistant | PlacementCare{% endblock %}
+
+{% block extra_css %}
+.assistant-page { min-height: calc(100vh - 180px); padding: clamp(1rem, 3vw, 2.5rem) 0; background: #f6f7fb; }
+.assistant-shell { max-width: 940px; margin: 0 auto; overflow: hidden; border: 1px solid #e5e9f2; border-radius: 1.25rem; background: #fff; box-shadow: 0 18px 50px rgba(20, 38, 65, .08); }
+.assistant-header { display: flex; align-items: center; gap: .9rem; padding: 1.25rem clamp(1rem, 3vw, 1.6rem); color: #fff; background: linear-gradient(120deg, #17254a, #344b7e); }
+.assistant-avatar { display: grid; width: 2.8rem; height: 2.8rem; flex: 0 0 auto; place-items: center; border: 1px solid rgba(255,255,255,.25); border-radius: .9rem; background: rgba(255,255,255,.12); font-size: 1.2rem; }
+.assistant-header h1 { margin: 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; }
+.assistant-header p { margin: .25rem 0 0; color: #dbe5fb; font-size: .82rem; }
+.assistant-log { display: flex; height: min(58vh, 560px); min-height: 340px; flex-direction: column; gap: 1rem; overflow-y: auto; padding: clamp(1rem, 3vw, 1.6rem); background: #f8f9fc; }
+.assistant-message { display: flex; width: 100%; }
+.assistant-message.user { justify-content: flex-end; }
+.assistant-bubble { max-width: min(82%, 680px); padding: .85rem 1rem; border: 1px solid #e5e9f2; border-radius: 1rem 1rem 1rem .3rem; background: #fff; color: #26344c; line-height: 1.6; overflow-wrap: anywhere; }
+.assistant-message.user .assistant-bubble { border-color: #3c5bdc; border-radius: 1rem 1rem .3rem 1rem; background: #3c5bdc; color: #fff; white-space: pre-wrap; }
+.assistant-bubble p:last-child, .assistant-bubble ul:last-child, .assistant-bubble ol:last-child { margin-bottom: 0; }
+.assistant-bubble pre { max-width: 100%; overflow-x: auto; padding: .75rem; border-radius: .6rem; background: #f1f3f8; }
+.assistant-composer { display: flex; align-items: end; gap: .75rem; padding: 1rem clamp(1rem, 3vw, 1.5rem); border-top: 1px solid #e9edf4; background: #fff; }
+.assistant-composer textarea { min-height: 48px; max-height: 140px; resize: vertical; border-radius: .8rem; }
+.assistant-composer button { min-height: 48px; padding-inline: 1.2rem; border-radius: .8rem; }
+.assistant-status { min-height: 1.4rem; padding: 0 clamp(1rem, 3vw, 1.5rem) .8rem; color: #64748b; font-size: .8rem; }
+@media (max-width: 575px) { .assistant-shell { border-radius: 0; } .assistant-page { padding: 0; } .assistant-log { height: 58vh; min-height: 320px; } .assistant-bubble { max-width: 92%; } }
+@media (prefers-reduced-motion: reduce) { .assistant-shell * { scroll-behavior: auto; } }
 {% endblock %}
 
 {% block content %}
-
-<div class="container py-4">
-
-    <div class="row justify-content-center">
-        <div class="col-lg-10">
-
-            <div class="card shadow-lg border-0">
-
-                <!-- HEADER -->
-                <div class="card-header bg-primary text-white">
-                    <h4 class="mb-0">🤖 CareerPilot AI Assistant</h4>
-                    <small>
-                        Career Guidance • Roadmaps • Certifications • Jobs • Interview Prep
-                    </small>
-                </div>
-
-                <!-- CHAT BOX -->
-                <div id="chat-box"
-                     class="card-body bg-light"
-                     style="height:600px; overflow-y:auto;">
-
-                    <!-- WELCOME MESSAGE -->
-                    <div class="ai-message">
-                        <div class="message-card">
-                            <strong>CareerPilot AI</strong>
-                            <p class="mb-0 mt-2">
-                                👋 Welcome! Ask me anything about careers, roadmaps, or interviews.
-                            </p>
-                        </div>
-                    </div>
-
-                </div>
-
-                <!-- INPUT AREA -->
-                <div class="card-footer bg-white">
-                    <div class="input-group">
-
-                        <input type="text"
-                               id="message"
-                               class="form-control"
-                               placeholder="Ask your career question..."
-                               onkeypress="handleEnter(event)">
-
-                        <button class="btn btn-primary"
-                                onclick="sendMessage()">
-                            Send
-                        </button>
-
-                    </div>
-                </div>
-
+<main class="assistant-page">
+    <section class="assistant-shell" aria-labelledby="assistant-title">
+        <header class="assistant-header">
+            <div class="assistant-avatar" aria-hidden="true"><i class="bi bi-chat-square-text"></i></div>
+            <div>
+                <h1 id="assistant-title">CareerPilot AI Assistant</h1>
+                <p>Career guidance, job-search planning, and interview practice</p>
             </div>
-
+        </header>
+        <div class="assistant-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions text">
+            <div class="assistant-message">
+                <div class="assistant-bubble"><strong>CareerPilot</strong><p class="mb-0 mt-2">Welcome. Ask a question about your next career step, skills to build, or interview preparation.</p></div>
+            </div>
         </div>
-    </div>
+        <form class="assistant-composer" id="chat-form">
+            <label class="visually-hidden" for="assistant-message">Ask CareerPilot a question</label>
+            <textarea class="form-control" id="assistant-message" name="message" rows="1" maxlength="2000" placeholder="Ask your career question…" required></textarea>
+            <button class="btn btn-gradient" id="send-message" type="submit"><span>Send</span><i class="bi bi-arrow-up-right ms-1" aria-hidden="true"></i></button>
+        </form>
+        <p class="assistant-status" id="assistant-status" role="status" aria-live="polite"></p>
+    </section>
+</main>
+{% endblock %}
 
-</div>
-
-<!-- Markdown -->
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-
-<style>
-
-.user-message {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 12px;
-}
-
-.ai-message {
-    display: flex;
-    justify-content: flex-start;
-    margin-bottom: 12px;
-}
-
-.message-card {
-    max-width: 80%;
-    padding: 12px 16px;
-    border-radius: 12px;
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-}
-
-.user-message .message-card {
-    background: #0d6efd;
-    color: white;
-}
-
-.typing {
-    font-style: italic;
-    color: #666;
-}
-
-pre {
-    background: #f8f9fa;
-    padding: 10px;
-    border-radius: 8px;
-    overflow-x: auto;
-}
-
-code {
-    color: #d63384;
-}
-
-</style>
-
-<script>
-
-let isSending = false;
-
-/* =========================
-   SAFE ESCAPE
-========================= */
-function escapeHtml(text) {
-    const div = document.createElement("div");
-    div.innerText = text;
-    return div.innerHTML;
-}
-
-/* =========================
-   ENTER KEY HANDLER
-========================= */
-function handleEnter(event) {
-    if (event.key === "Enter") {
-        event.preventDefault();
-        sendMessage();
-    }
-}
-
-/* =========================
-   ADD MESSAGE
-========================= */
-function addMessage(role, content) {
-
-    const chatBox = document.getElementById("chat-box");
-
-    const wrapper = document.createElement("div");
-    wrapper.className = role === "user" ? "user-message" : "ai-message";
-
-    const card = document.createElement("div");
-    card.className = "message-card";
-
-    if (role === "user") {
-        card.innerHTML = `
-            <strong>You</strong>
-            <div>${escapeHtml(content)}</div>
-        `;
-    } else {
-        card.innerHTML = `
-            <strong>CareerPilot AI</strong>
-            <div class="mt-2">${content}</div>
-        `;
-    }
-
-    wrapper.appendChild(card);
-    chatBox.appendChild(wrapper);
-
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-/* =========================
-   TYPING INDICATOR
-========================= */
-function showTyping() {
-
-    if (document.getElementById("typing-indicator")) return;
-
-    const chatBox = document.getElementById("chat-box");
-
-    const wrapper = document.createElement("div");
-    wrapper.className = "ai-message";
-    wrapper.id = "typing-indicator";
-
-    const card = document.createElement("div");
-    card.className = "message-card typing";
-    card.innerText = "CareerPilot AI is thinking...";
-
-    wrapper.appendChild(card);
-    chatBox.appendChild(wrapper);
-
-    chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-/* =========================
-   REMOVE TYPING
-========================= */
-function removeTyping() {
-    const el = document.getElementById("typing-indicator");
-    if (el) el.remove();
-}
-
-/* =========================
-   SEND MESSAGE
-========================= */
-async function sendMessage() {
-
-    if (isSending) return;
-
-    const input = document.getElementById("message");
-    const message = input.value.trim();
-
-    if (!message) return;
-
-    isSending = true;
-    input.disabled = true;
-
-    addMessage("user", message);
-
-    input.value = "";
-
-    showTyping();
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-    try {
-
-        const response = await fetch("/chatbot/ask", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ message }),
-            signal: controller.signal
-        });
-
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || "Request failed with status " + response.status);
-        }
-
-        removeTyping();
-
-        addMessage(
-            "ai",
-            marked.parse(data.response || "No response received.")
-        );
-
-    } catch (error) {
-
-        console.warn("CareerPilot chatbot request failed:", error.message);
-
-        removeTyping();
-
-        addMessage(
-            "ai",
-            `<span style="color:red;">❌ ${escapeHtml(error.name === "AbortError" ? "No answer arrived in 12 seconds. Please retry with a shorter question." : error.message || "Unable to connect to server.")}</span>`
-        );
-    } finally {
-        clearTimeout(timeoutId);
-        input.disabled = false;
-        input.focus();
-        isSending = false;
-    }
-}
-
-</script>
-
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js" defer></script>
+<script src="{{ url_for('static', filename='js/chatbot.js') }}" defer></script>
 {% endblock %}

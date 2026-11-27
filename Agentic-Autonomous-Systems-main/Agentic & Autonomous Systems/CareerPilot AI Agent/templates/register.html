@@ -40,6 +40,10 @@
     @media (max-width: 760px) { .auth-shell { max-width: 560px; grid-template-columns: 1fr; } .auth-art { min-height: 280px; padding: 1.4rem 1.5rem; } .auth-art::before { background-position: center 40%; } .auth-art-copy { margin-top: 3rem; } .auth-art h2 { font-size: 2rem; } .auth-art-copy > p { max-width: 420px; font-size: .85rem; } .auth-path { margin-top: 1rem; } .auth-path-step { font-size: .65rem; } .auth-path-line { width: 18px; } .auth-art-foot { display:none; } .auth-form-panel { padding: 2rem 1.5rem 2.25rem; } }
     @media (max-width: 380px) { .auth-art { min-height: 250px; } .auth-path { gap: .35rem; } .auth-path-step { gap: .3rem; font-size: .59rem; } .auth-path-step i { width: 22px; height: 22px; } }
     @media (prefers-reduced-motion: reduce) { .google-auth-button { transition: none; } }
+    .auth-page { min-height: calc(100vh - 110px); padding-block: 2rem; }
+    .auth-shell { width: min(100%, 520px); grid-template-columns: 1fr; border-radius: 22px; }
+    .auth-art { display: none; }
+    .auth-form-panel { padding: clamp(1.5rem, 5vw, 3rem); }
 {% endblock %}
 
 {% block content %}

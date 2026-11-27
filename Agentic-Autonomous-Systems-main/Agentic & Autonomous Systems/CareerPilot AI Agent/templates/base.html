@@ -240,9 +240,7 @@
             <ul class="navbar-nav ms-auto">
 
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('features') }}">Explore</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('roadmap') }}">Roadmap</a></li>
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('careers') }}">Career paths</a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('content_page', slug='resources') }}">Resources</a></li>
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('about') }}">About</a></li>
 
             </ul>
@@ -345,7 +343,7 @@
 
                     <li class="mb-2"><a class="footer-link" href="{{ url_for('features') }}">Features</a></li>
                     <li class="mb-2"><a class="footer-link" href="{{ url_for('dashboard') }}">Dashboard</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('roadmap') }}">Roadmap</a></li>
+
                     <li class="mb-2"><a class="footer-link" href="{{ url_for('careers') }}">Career Paths</a></li>
 
                 </ul>
@@ -368,21 +366,6 @@
 
             </div>
 
-            <!-- RESOURCES -->
-            <div class="col-md-2">
-
-                <h6 class="fw-bold">Resources</h6>
-
-                <ul class="list-unstyled mt-3">
-
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='blog') }}">Blog</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='learning-hub') }}">Learning Hub</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='interview-prep') }}">Interview Prep</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='help-center') }}">Help Center</a></li>
-
-                </ul>
-
-            </div>
 
             <!-- COMPANY -->
             <div class="col-md-2">
@@ -392,8 +375,6 @@
                 <ul class="list-unstyled mt-3">
 
                     <li class="mb-2"><a class="footer-link" href="{{ url_for('about') }}">About</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='privacy-policy') }}">Privacy Policy</a></li>
-                    <li class="mb-2"><a class="footer-link" href="{{ url_for('content_page', slug='terms') }}">Terms</a></li>
                     <li class="mb-2"><a class="footer-link" href="{{ url_for('contact') }}">Contact</a></li>
 
                 </ul>

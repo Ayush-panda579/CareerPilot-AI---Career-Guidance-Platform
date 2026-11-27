@@ -165,7 +165,10 @@
                                         <div class="small text-secondary">{{ resume.created_at[:10] }}</div>
                                     </div>
                                 </div>
-                                <span class="resume-status {{ resume.status }}">{{ resume.status|title }}</span>
+                                <div class="d-flex align-items-center gap-2">
+                                    {% if resume.analysis %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('resume_result', resume_id=resume.id) }}">View analysis</a>{% endif %}
+                                    <span class="resume-status {{ resume.status }}">{{ resume.status|title }}</span>
+                                </div>
                             </li>
                             {% endfor %}
                         </ul>

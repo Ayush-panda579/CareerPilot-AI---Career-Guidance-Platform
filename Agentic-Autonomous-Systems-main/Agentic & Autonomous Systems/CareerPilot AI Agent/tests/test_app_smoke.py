@@ -94,6 +94,37 @@ class FlaskSmokeTests(unittest.TestCase):
             patch.object(db, "create_contact_message"),
             patch.object(db, "create_resume_upload", return_value={"id": "resume-id"}),
             patch.object(db, "update_resume_upload_status", return_value=True),
+            patch.object(db, "update_resume_analysis", return_value=True),
+            patch.object(
+                db,
+                "get_resume_upload",
+                return_value={
+                    "id": "resume-id",
+                    "original_filename": "resume.pdf",
+                    "status": "ready",
+                    "analysis": {
+                        "summary": {
+                            "word_count": 75,
+                            "skills_found": 1,
+                            "contact_details": {
+                                "name_or_heading": "Jordan Lee",
+                                "email": "jordan@example.test",
+                                "phone": None,
+                            },
+                            "sections_found": ["Experience"],
+                        },
+                        "skills": ["Python"],
+                        "job_matches": [],
+                        "learning_resources": [],
+                        "notice": "Indicative keyword match.",
+                    },
+                },
+            ),
+            patch.object(
+                app_module,
+                "extract_resume_text",
+                return_value="Jordan Lee\nEmail: jordan@example.test\nPython SQL Git and Flask experience. " * 2,
+            ),
             patch.object(db, "create_learning_progress", return_value={"id": "goal-id"}),
             patch.object(db, "update_learning_progress", return_value={"id": "goal-id"}),
             patch.object(db, "delete_learning_progress", return_value=True),
@@ -118,9 +149,8 @@ class FlaskSmokeTests(unittest.TestCase):
         for route in (
             "/", "/features", "/roadmap", "/careers", "/contact", "/about",
             "/register", "/login", "/resume-analyzer", "/skill-extractor",
-            "/ai-mentor", "/job-matcher", "/resources", "/blog",
+            "/ai-mentor", "/job-matcher", "/blog",
             "/learning-hub", "/interview-prep", "/help-center",
-            "/privacy-policy", "/terms",
         ):
             with self.subTest(route=route):
                 self.assertEqual(self.client.get(route).status_code, 200)
@@ -132,6 +162,9 @@ class FlaskSmokeTests(unittest.TestCase):
         favicon = self.client.get("/favicon.ico", follow_redirects=True, buffered=True)
         self.assertEqual(favicon.status_code, 200)
         favicon.close()
+        self.assertEqual(self.client.get("/resources").status_code, 404)
+        self.assertEqual(self.client.get("/privacy-policy").status_code, 404)
+        self.assertEqual(self.client.get("/terms").status_code, 404)
         self.assertEqual(self.client.get("/missing-page").status_code, 404)
 
     def test_vercel_entrypoint_and_rewrite_configuration(self):
@@ -216,6 +249,7 @@ class FlaskSmokeTests(unittest.TestCase):
         self.assertEqual(self.client.get("/dashboard").status_code, 302)
         self.assertEqual(self.client.get("/upload").status_code, 302)
         self.assertEqual(self.client.get("/chatbot").status_code, 302)
+        self.assertEqual(self.client.get("/resumes/resume-id").status_code, 302)
         self.assertEqual(self.client.get("/api/realtime/session").status_code, 401)
 
         login = self._sign_in()
@@ -223,6 +257,13 @@ class FlaskSmokeTests(unittest.TestCase):
         self.assertEqual(self.client.get("/dashboard").status_code, 200)
         self.assertEqual(self.client.get("/upload").status_code, 200)
         self.assertEqual(self.client.get("/chatbot").status_code, 200)
+        private_analysis = self.client.get("/resumes/resume-id")
+        self.assertEqual(private_analysis.status_code, 200)
+        self.assertIn(b"Your resume analysis", private_analysis.data)
+        self.assertIn(b"Jordan Lee", private_analysis.data)
+        db.get_resume_upload.assert_called_with(
+            self.auth_context["client"], self.user.id, "resume-id"
+        )
 
         realtime = self.client.get("/api/realtime/session")
         self.assertEqual(realtime.status_code, 200)
@@ -289,11 +330,10 @@ class FlaskSmokeTests(unittest.TestCase):
             content_type="multipart/form-data",
         )
         self.assertEqual(valid.status_code, 302)
-        self.assertIn("/dashboard", valid.headers["Location"])
+        self.assertIn("/resumes/resume-id", valid.headers["Location"])
         db.create_resume_upload.assert_called_once()
-        db.update_resume_upload_status.assert_called_once_with(
-            self.auth_context["client"], self.user.id, "resume-id", "ready"
-        )
+        db.update_resume_analysis.assert_called_once()
+        self.assertEqual(db.update_resume_upload_status.call_args.args[-1], "ready")
         uploaded_files = list(Path(app_module.app.config["UPLOAD_FOLDER"]).iterdir())
         self.assertEqual(len(uploaded_files), 1)
 

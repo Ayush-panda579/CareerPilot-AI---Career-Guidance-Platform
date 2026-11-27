@@ -292,7 +292,7 @@ def get_dashboard_data(client, user_id):
     )
     resume_rows = _rows(
         client.table("resume_uploads")
-        .select("id, original_filename, status, created_at, updated_at")
+        .select("id, original_filename, status, created_at, updated_at, analysis")
         .eq("owner_id", user_id)
         .order("created_at", desc=True)
         .limit(10)
@@ -382,6 +382,30 @@ def update_resume_upload_status(client, user_id, resume_id, status):
         .execute()
     )
     return bool(getattr(response, "data", None))
+
+
+def update_resume_analysis(client, user_id, resume_id, analysis):
+    response = (
+        client.table("resume_uploads")
+        .update({"analysis": analysis})
+        .eq("id", resume_id)
+        .eq("owner_id", user_id)
+        .select("id")
+        .execute()
+    )
+    return bool(getattr(response, "data", None))
+
+
+def get_resume_upload(client, user_id, resume_id):
+    rows = _rows(
+        client.table("resume_uploads")
+        .select("id, original_filename, status, created_at, analysis")
+        .eq("id", resume_id)
+        .eq("owner_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    return rows[0] if rows else None
 
 
 def create_contact_message(name, email, message):
