@@ -3,49 +3,90 @@
 {% block title %}Sign in | PlacementCare{% endblock %}
 
 {% block extra_css %}
-<style>
-    .auth-page { min-height: 68vh; display: flex; align-items: center; justify-content: center; padding: 3rem 1rem; background: radial-gradient(circle at 15% 10%, #e9f5f5 0, transparent 34%), #f7f9fc; }
-    .auth-card { width: min(100%, 480px); border: 1px solid #e6ebf2; border-radius: 1.25rem; background: #fff; padding: clamp(1.5rem, 4vw, 2.4rem); box-shadow: 0 20px 55px rgba(28, 51, 79, .09); }
-    .auth-kicker { color: #177c76; font-size: .75rem; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
-    .auth-card h1 { color: #142641; font-size: 1.8rem; font-weight: 750; letter-spacing: -.04em; }
-    .auth-card .form-control { min-height: 48px; border-color: #dce3ec; border-radius: .7rem; }
-    .auth-card .form-control:focus { border-color: #2b8d86; box-shadow: 0 0 0 .2rem rgba(43, 141, 134, .14); }
-    .auth-divider { display:flex; align-items:center; gap:.85rem; margin:1.25rem 0; color:#8b92a0; font-size:.82rem; }
-    .auth-divider::before,.auth-divider::after { content:""; height:1px; flex:1; background:#e6ebf2; }
-    .google-auth-button { display:flex; justify-content:center; align-items:center; gap:.7rem; min-height:48px; border:1px solid #dce3ec; border-radius:.7rem; background:#fff; color:#202124; font-weight:650; text-decoration:none; transition:background .2s ease,border-color .2s ease; }
-    .google-auth-button:hover { color:#202124; border-color:#b9c4d3; background:#f8fafc; }
-    .google-auth-button i { color:#4285f4; font-size:1.1rem; }
-    .auth-provider-note { color:#778094; font-size:.78rem; line-height:1.5; }
-</style>
+    .auth-page { min-height: 76vh; display: flex; align-items: center; justify-content: center; padding: clamp(1.5rem, 5vw, 4rem) 1rem; background: radial-gradient(ellipse at 14% 16%, rgba(96,165,250,.13), transparent 34%), #f7f8fc; }
+    .auth-shell { width: min(100%, 1040px); display: grid; grid-template-columns: minmax(0, 1.02fr) minmax(360px, .98fr); overflow: hidden; border: 1px solid #e5e7eb; border-radius: 28px; background: #fff; box-shadow: 0 28px 80px rgba(28, 37, 69, .12); }
+    .auth-art { position: relative; min-height: 620px; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; padding: clamp(1.5rem, 4vw, 2.8rem); color: #fff; background: #151d3e; isolation: isolate; }
+    .auth-art::before { content: ""; position: absolute; z-index: -2; inset: 0; background: linear-gradient(180deg, rgba(13,20,48,.12) 15%, rgba(13,20,48,.24) 44%, #151d3e 96%), url("{{ url_for('static', filename='images/career-growth-sculpture.png') }}") center 38% / cover no-repeat; opacity: .96; }
+    .auth-art::after { content: ""; position: absolute; z-index: -1; width: 360px; height: 360px; border: 1px solid rgba(255,255,255,.18); border-radius: 50%; top: 24%; left: -26%; box-shadow: 0 0 0 36px rgba(255,255,255,.035), 0 0 0 72px rgba(255,255,255,.025); }
+    .auth-brand { display: flex; align-items: center; gap: .75rem; font-weight: 750; letter-spacing: -.02em; }
+    .auth-brand-mark { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid rgba(255,255,255,.32); border-radius: 12px; background: rgba(255,255,255,.12); backdrop-filter: blur(12px); }
+    .auth-art-copy { max-width: 390px; }
+    .auth-art-eyebrow { display: inline-flex; align-items: center; gap: .5rem; margin-bottom: 1rem; color: #dbeafe; font-size: .74rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+    .auth-art h2 { max-width: 360px; margin: 0 0 .8rem; color: #fff; font-size: clamp(2rem, 4vw, 3rem); font-weight: 700; letter-spacing: -.055em; line-height: 1.05; }
+    .auth-art-copy > p { max-width: 330px; margin: 0; color: rgba(255,255,255,.78); font-size: .95rem; line-height: 1.7; }
+    .auth-path { display: flex; align-items: center; gap: .65rem; margin-top: 1.8rem; }
+    .auth-path-step { display: flex; align-items: center; gap: .45rem; color: rgba(255,255,255,.9); font-size: .72rem; font-weight: 600; white-space: nowrap; }
+    .auth-path-step i { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid rgba(255,255,255,.3); border-radius: 50%; background: rgba(255,255,255,.13); font-size: .7rem; }
+    .auth-path-line { width: 24px; height: 1px; background: rgba(255,255,255,.36); }
+    .auth-art-foot { color: rgba(255,255,255,.65); font-size: .72rem; }
+    .auth-form-panel { display: flex; align-items: center; justify-content: center; padding: clamp(1.5rem, 5vw, 3.5rem); }
+    .auth-form-content { width: 100%; max-width: 380px; }
+    .auth-kicker { margin-bottom: .55rem; color: #6657c8; font-size: .72rem; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+    .auth-form-content h1 { margin: 0 0 .55rem; color: #18213c; font-size: clamp(1.8rem, 3vw, 2.25rem); font-weight: 750; letter-spacing: -.055em; }
+    .auth-intro { margin-bottom: 1.8rem; color: #6b7280; font-size: .92rem; line-height: 1.65; }
+    .auth-form-content .form-label { margin-bottom: .45rem; color: #30384c; font-size: .82rem; font-weight: 650; }
+    .auth-form-content .form-control { min-height: 49px; border-color: #e1e4ec; border-radius: 11px; background: #fff; font-size: .9rem; }
+    .auth-form-content .form-control:focus { border-color: #6657c8; box-shadow: 0 0 0 .2rem rgba(102,87,200,.13); }
+    .auth-submit { min-height: 49px; margin-top: .25rem; border-radius: 11px; font-size: .9rem; font-weight: 650; }
+    .auth-divider { display:flex; align-items:center; gap:.85rem; margin:1.25rem 0; color:#8b92a0; font-size:.78rem; }
+    .auth-divider::before,.auth-divider::after { content:""; height:1px; flex:1; background:#e8eaf0; }
+    .google-auth-button { display:flex; justify-content:center; align-items:center; gap:.65rem; min-height:48px; border:1px solid #e1e4ec; border-radius:11px; background:#fff; color:#303544; font-size:.87rem; font-weight:600; text-decoration:none; transition:background .2s ease,border-color .2s ease,transform .2s ease; }
+    .google-auth-button:hover { color:#202124; border-color:#c7cbd5; background:#fafbff; transform:translateY(-1px); }
+    .google-auth-button i { color:#4285f4; font-size:1rem; }
+    .auth-provider-note { color:#818797; font-size:.72rem; line-height:1.55; }
+    .auth-switch { margin:1.5rem 0 0; color:#737989; font-size:.83rem; text-align:center; }
+    .auth-switch a { color:#5445b1; font-weight:700; text-decoration:none; }
+    .auth-switch a:hover { text-decoration:underline; }
+    @media (max-width: 760px) { .auth-shell { max-width: 560px; grid-template-columns: 1fr; } .auth-art { min-height: 280px; padding: 1.4rem 1.5rem; } .auth-art::before { background-position: center 40%; } .auth-art-copy { margin-top: 3rem; } .auth-art h2 { font-size: 2rem; } .auth-art-copy > p { max-width: 420px; font-size: .85rem; } .auth-path { margin-top: 1rem; } .auth-path-step { font-size: .65rem; } .auth-path-line { width: 18px; } .auth-art-foot { display:none; } .auth-form-panel { padding: 2rem 1.5rem 2.25rem; } }
+    @media (max-width: 380px) { .auth-art { min-height: 250px; } .auth-path { gap: .35rem; } .auth-path-step { gap: .3rem; font-size: .59rem; } .auth-path-step i { width: 22px; height: 22px; } }
+    @media (prefers-reduced-motion: reduce) { .google-auth-button { transition: none; } }
 {% endblock %}
 
 {% block content %}
 <main class="auth-page">
-    <section class="auth-card" aria-labelledby="sign-in-title">
-        <p class="auth-kicker mb-2">Your next chapter starts here</p>
-        <h1 id="sign-in-title" class="mb-2">Welcome back</h1>
-        <p class="text-secondary mb-4">Sign in to continue your career plan and pick up where you left off.</p>
-
-        <form method="post" action="{{ url_for('login') }}">
-            <div class="mb-3">
-                <label class="form-label fw-semibold" for="email">Email address</label>
-                <input class="form-control" id="email" type="email" name="email" autocomplete="email" inputmode="email" maxlength="254" required>
+    <section class="auth-shell" aria-label="PlacementCare sign in">
+        <aside class="auth-art" aria-label="A visual career journey with milestones for exploring, learning, and growing">
+            <div class="auth-brand"><span class="auth-brand-mark"><i class="bi bi-compass" aria-hidden="true"></i></span><span>PlacementCare</span></div>
+            <div class="auth-art-copy">
+                <p class="auth-art-eyebrow"><i class="bi bi-stars" aria-hidden="true"></i> Your next chapter</p>
+                <h2>Find your direction. Make it yours.</h2>
+                <p>A thoughtful space for the goals, skills, and small wins that move your career forward.</p>
+                <div class="auth-path" aria-label="Explore, learn, grow">
+                    <span class="auth-path-step"><i class="bi bi-compass" aria-hidden="true"></i> Explore</span><span class="auth-path-line" aria-hidden="true"></span>
+                    <span class="auth-path-step"><i class="bi bi-journal-check" aria-hidden="true"></i> Learn</span><span class="auth-path-line" aria-hidden="true"></span>
+                    <span class="auth-path-step"><i class="bi bi-arrow-up-right" aria-hidden="true"></i> Grow</span>
+                </div>
             </div>
-            <div class="mb-4">
-                <label class="form-label fw-semibold" for="password">Password</label>
-                <input class="form-control" id="password" type="password" name="password" autocomplete="current-password" required>
+            <p class="auth-art-foot mb-0">A clearer path, one step at a time.</p>
+        </aside>
+        <div class="auth-form-panel">
+            <div class="auth-form-content">
+                <p class="auth-kicker">Welcome back</p>
+                <h1 id="sign-in-title">Good to see you.</h1>
+                <p class="auth-intro">Sign in to continue your career plan and pick up where you left off.</p>
+
+                <form method="post" action="{{ url_for('login') }}" aria-labelledby="sign-in-title">
+                    <div class="mb-3">
+                        <label class="form-label" for="email">Email address</label>
+                        <input class="form-control" id="email" type="email" name="email" autocomplete="email" inputmode="email" maxlength="254" required>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label" for="password">Password</label>
+                        <input class="form-control" id="password" type="password" name="password" autocomplete="current-password" required>
+                    </div>
+                    <button class="btn btn-gradient auth-submit w-100" type="submit">Sign in <i class="bi bi-arrow-right ms-1" aria-hidden="true"></i></button>
+                </form>
+
+                <div class="auth-divider" aria-hidden="true">or continue with</div>
+                <a class="google-auth-button" href="{{ url_for('google_login') }}">
+                    <i class="bi bi-google" aria-hidden="true"></i>
+                    <span>Google</span>
+                </a>
+                <p class="auth-provider-note text-center mt-2 mb-0">Administrators must use a verified, pre-authorized Google account.</p>
+
+                <p class="auth-switch">New to PlacementCare? <a href="{{ url_for('register') }}">Create an account <span aria-hidden="true">→</span></a></p>
             </div>
-            <button class="btn btn-gradient w-100 py-3" type="submit">Sign in</button>
-        </form>
-
-        <div class="auth-divider" aria-hidden="true">or</div>
-        <a class="google-auth-button" href="{{ url_for('google_login') }}">
-            <i class="bi bi-google" aria-hidden="true"></i>
-            <span>Continue with Google</span>
-        </a>
-        <p class="auth-provider-note text-center mt-2 mb-0">Administrators must use a verified, pre-authorized Google account.</p>
-
-        <p class="text-center text-secondary mt-4 mb-0">New to PlacementCare? <a href="{{ url_for('register') }}" class="fw-semibold">Create an account</a></p>
+        </div>
     </section>
 </main>
 {% endblock %}
