@@ -1,173 +1,276 @@
 import os
-import sqlite3
-from pathlib import Path
+from dataclasses import dataclass
+from typing import Any
 
 try:
-    import psycopg
-    from psycopg.rows import dict_row
+    from supabase import create_client
 except ImportError:
-    psycopg = None
-    dict_row = None
+    create_client = None
 
 
-APP_ROOT = Path(__file__).resolve().parent
+class SupabaseConfigurationError(RuntimeError):
+    """The Supabase URL, public key, or SDK is unavailable."""
 
 
-class DuplicateUserError(Exception):
-    """Raised when a username or email address is already registered."""
+class DuplicateUserError(RuntimeError):
+    """Raised when Supabase rejects an account as already registered."""
 
 
-def _database_url():
-    return os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
+@dataclass
+class AuthSession:
+    access_token: str
+    refresh_token: str
+    expires_in: int = 3600
 
 
-def get_conn():
-    database_url = _database_url()
-    if database_url:
-        if psycopg is None:
-            raise RuntimeError(
-                "PostgreSQL is configured, but psycopg is not installed."
-            )
-        if database_url.startswith("postgres://"):
-            database_url = "postgresql://" + database_url[len("postgres://"):]
-        return psycopg.connect(database_url, row_factory=dict_row)
+@dataclass
+class AuthResult:
+    user: Any
+    session: AuthSession | None
 
-    if os.getenv("VERCEL") == "1":
-        raise RuntimeError(
-            "Set DATABASE_URL to a managed PostgreSQL connection string on Vercel."
+
+def get_client(access_token=None):
+    if create_client is None:
+        raise SupabaseConfigurationError("Install the Supabase Python SDK.")
+
+    url = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+    public_key = (
+        os.getenv("SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
+        or os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    )
+    if not url or not public_key:
+        raise SupabaseConfigurationError(
+            "Supabase URL and publishable key must be configured."
         )
 
-    sqlite_path = Path(
-        os.getenv("SQLITE_PATH", str(APP_ROOT / "careerpilot.db"))
-    )
-    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(sqlite_path)
-    conn.row_factory = sqlite3.Row
-    return conn
+    client = create_client(url, public_key)
+    if access_token:
+        client.postgrest.auth(access_token)
+    return client
 
 
-def _execute(conn, query, parameters=()):
-    if _database_url():
-        query = query.replace("?", "%s")
-    return conn.execute(query, parameters)
-
-
-def _is_integrity_error(error):
-    return isinstance(error, sqlite3.IntegrityError) or (
-        psycopg is not None and isinstance(error, psycopg.IntegrityError)
+def _normalize_session(session):
+    if session is None:
+        return None
+    return AuthSession(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        expires_in=int(getattr(session, "expires_in", 3600) or 3600),
     )
 
 
-def init_db():
-    conn = get_conn()
-    try:
-        if _database_url():
-            _execute(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id BIGSERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL
-                )
-                """,
-            )
-            _execute(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS contact_messages (
-                    id BIGSERIAL PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    email TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """,
-            )
-        else:
-            _execute(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    email TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL
-                )
-                """,
-            )
-            _execute(
-                conn,
-                """
-                CREATE TABLE IF NOT EXISTS contact_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    email TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """,
-            )
-        conn.commit()
-    finally:
-        conn.close()
+def _auth_result(response):
+    return AuthResult(
+        user=getattr(response, "user", None),
+        session=_normalize_session(getattr(response, "session", None)),
+    )
 
 
-def create_user(username, email, password):
-    conn = get_conn()
+def sign_up(email, password, display_name, email_redirect_to):
+    client = get_client()
     try:
-        _execute(
-            conn,
-            """
-            INSERT INTO users (username, email, password)
-            VALUES (?, ?, ?)
-            """,
-            (username, email, password),
+        response = client.auth.sign_up(
+            {
+                "email": email,
+                "password": password,
+                "options": {
+                    "data": {"display_name": display_name},
+                    "email_redirect_to": email_redirect_to,
+                },
+            }
         )
-        conn.commit()
     except Exception as error:
-        if _is_integrity_error(error):
-            raise DuplicateUserError(
-                "Username or email address is already registered."
-            ) from error
+        message = str(error).lower()
+        if "already registered" in message or "already been registered" in message:
+            raise DuplicateUserError("Account already exists.") from error
         raise
-    finally:
-        conn.close()
+    return _auth_result(response)
 
 
-def get_user(username):
-    conn = get_conn()
-    try:
-        return _execute(
-            conn,
-            """
-            SELECT *
-            FROM users
-            WHERE username = ?
-            """,
-            (username,),
-        ).fetchone()
-    finally:
-        conn.close()
+def sign_in(email, password):
+    client = get_client()
+    response = client.auth.sign_in_with_password(
+        {"email": email, "password": password}
+    )
+    result = _auth_result(response)
+    if result.session:
+        client.postgrest.auth(result.session.access_token)
+    return result
+
+
+def sign_out(access_token, refresh_token):
+    client = get_client()
+    if access_token and refresh_token:
+        client.auth.set_session(access_token, refresh_token)
+    client.auth.sign_out()
+
+
+def verify_email_token(token_hash, token_type):
+    client = get_client()
+    response = client.auth.verify_otp(
+        {"token_hash": token_hash, "type": token_type}
+    )
+    return _auth_result(response)
+
+
+def exchange_auth_code(code):
+    client = get_client()
+    response = client.auth.exchange_code_for_session(code)
+    return _auth_result(response)
+
+
+def authenticate_session(access_token, refresh_token):
+    if not access_token and not refresh_token:
+        return None
+
+    client = get_client()
+    user = None
+    session = None
+
+    if access_token:
+        try:
+            response = client.auth.get_user(access_token)
+            user = getattr(response, "user", None)
+        except Exception:
+            user = None
+
+    if user and access_token:
+        client.postgrest.auth(access_token)
+        session = AuthSession(access_token, refresh_token, 3600)
+    elif refresh_token:
+        try:
+            response = client.auth.refresh_session(refresh_token)
+            session = _normalize_session(getattr(response, "session", None))
+            user = getattr(response, "user", None)
+            if session and not user:
+                user_response = client.auth.get_user(session.access_token)
+                user = getattr(user_response, "user", None)
+            if session:
+                client.postgrest.auth(session.access_token)
+        except Exception:
+            return None
+
+    if not user or not session:
+        return None
+
+    return {"client": client, "user": user, "session": session}
+
+
+def _rows(response):
+    data = getattr(response, "data", None)
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def get_dashboard_data(client, user_id):
+    profile_rows = _rows(
+        client.table("profiles")
+        .select("id, display_name, created_at, updated_at")
+        .eq("id", user_id)
+        .limit(1)
+        .execute()
+    )
+    resume_rows = _rows(
+        client.table("resume_uploads")
+        .select("id, original_filename, status, created_at, updated_at")
+        .eq("owner_id", user_id)
+        .order("created_at", desc=True)
+        .limit(10)
+        .execute()
+    )
+    progress_rows = _rows(
+        client.table("learning_progress")
+        .select("id, goal, completed, created_at, updated_at")
+        .eq("owner_id", user_id)
+        .order("created_at", desc=False)
+        .limit(50)
+        .execute()
+    )
+    return {
+        "profile": profile_rows[0] if profile_rows else None,
+        "resumes": resume_rows,
+        "progress": progress_rows,
+    }
+
+
+def create_learning_progress(client, user_id, goal):
+    response = (
+        client.table("learning_progress")
+        .insert({"owner_id": user_id, "goal": goal})
+        .select("id, goal, completed, created_at, updated_at")
+        .execute()
+    )
+    rows = _rows(response)
+    if not rows:
+        raise RuntimeError("The learning goal was not returned after saving.")
+    return rows[0]
+
+
+def update_learning_progress(client, user_id, progress_id, completed):
+    response = (
+        client.table("learning_progress")
+        .update({"completed": completed})
+        .eq("id", progress_id)
+        .eq("owner_id", user_id)
+        .select("id, goal, completed, created_at, updated_at")
+        .execute()
+    )
+    rows = _rows(response)
+    if not rows:
+        return None
+    return rows[0]
+
+
+def delete_learning_progress(client, user_id, progress_id):
+    response = (
+        client.table("learning_progress")
+        .delete()
+        .eq("id", progress_id)
+        .eq("owner_id", user_id)
+        .select("id")
+        .execute()
+    )
+    return bool(getattr(response, "data", None))
+
+
+def create_resume_upload(client, user_id, original_filename, storage_key):
+    response = (
+        client.table("resume_uploads")
+        .insert(
+            {
+                "owner_id": user_id,
+                "original_filename": original_filename,
+                "storage_key": storage_key,
+                "status": "uploading",
+            }
+        )
+        .select("id, original_filename, status, created_at")
+        .execute()
+    )
+    rows = _rows(response)
+    if not rows:
+        raise RuntimeError("The resume record was not returned after saving.")
+    return rows[0]
+
+
+def update_resume_upload_status(client, user_id, resume_id, status):
+    response = (
+        client.table("resume_uploads")
+        .update({"status": status})
+        .eq("id", resume_id)
+        .eq("owner_id", user_id)
+        .execute()
+    )
+    return bool(getattr(response, "data", None))
 
 
 def create_contact_message(name, email, message):
-    conn = get_conn()
-    try:
-        _execute(
-            conn,
-            """
-            INSERT INTO contact_messages (name, email, message)
-            VALUES (?, ?, ?)
-            """,
-            (name, email, message),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-if __name__ == "__main__":
-    init_db()
-    print("Database initialized successfully.")
+    client = get_client()
+    return (
+        client.table("contact_messages")
+        .insert({"name": name, "email": email, "message": message})
+        .execute()
+    )

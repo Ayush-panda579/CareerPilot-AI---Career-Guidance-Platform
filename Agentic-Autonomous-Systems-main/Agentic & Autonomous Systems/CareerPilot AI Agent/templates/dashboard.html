@@ -1,364 +1,186 @@
 {% extends 'base.html' %}
 
-{% block title %}
-CareerPilot AI Dashboard
-{% endblock %}
+{% block title %}Dashboard | PlacementCare{% endblock %}
 
 {% block extra_css %}
-
 <style>
-
-body{
-    background:#f4f6f9;
-}
-
-.dashboard-wrapper{
-    display:flex;
-    min-height:100vh;
-}
-
-/* Sidebar */
-
-.sidebar{
-    width:260px;
-    background:#111827;
-    color:white;
-    padding:25px;
-    position:fixed;
-    height:100vh;
-    overflow-y:auto;
-}
-
-.sidebar-brand{
-    font-size:1.6rem;
-    font-weight:700;
-    margin-bottom:30px;
-}
-
-.sidebar-link{
-    display:block;
-    color:#d1d5db;
-    text-decoration:none;
-    padding:12px;
-    border-radius:10px;
-    margin-bottom:8px;
-    transition:.3s;
-}
-
-.sidebar-link:hover{
-    background:#1f2937;
-    color:white;
-}
-
-/* Main Content */
-
-.dashboard-content{
-    margin-left:260px;
-    flex:1;
-    padding:30px;
-}
-
-/* Cards */
-
-.section-card{
-    background:white;
-    border-radius:20px;
-    padding:25px;
-    margin-bottom:25px;
-    box-shadow:0 5px 20px rgba(0,0,0,.08);
-}
-
-.score-card{
-    background:white;
-    border-radius:20px;
-    padding:25px;
-    text-align:center;
-    box-shadow:0 5px 20px rgba(0,0,0,.08);
-}
-
-.score-value{
-    font-size:2.3rem;
-    font-weight:700;
-    color:#2563eb;
-}
-
-/* Badges */
-
-.skill-badge{
-    display:inline-block;
-    padding:8px 15px;
-    margin:5px;
-    border-radius:50px;
-    font-weight:600;
-}
-
-.skill{
-    background:#dbeafe;
-    color:#1d4ed8;
-}
-
-.gap{
-    background:#fee2e2;
-    color:#dc2626;
-}
-
-html{
-    scroll-behavior:smooth;
-}
-
+    body { background: #f2f4f8; }
+    .dashboard-shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 72vh; }
+    .dashboard-sidebar { background: #11152b; color: #eef3ff; padding: 1.5rem 1rem; }
+    .sidebar-heading { color: #91a0ba; font-size: .72rem; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; padding: 1rem .8rem .5rem; }
+    .dashboard-sidebar a { color: #c6cbe0; text-decoration: none; display: flex; align-items: center; gap: .75rem; padding: .72rem .8rem; border-radius: .75rem; margin: .2rem 0; transition: background .2s ease, transform .2s ease; }
+    .dashboard-sidebar a:hover, .dashboard-sidebar a:focus-visible { color: #fff; background: #252a48; outline: none; transform: translateX(3px); }
+    .dashboard-main { min-width: 0; padding: clamp(1.1rem, 3vw, 2.5rem); }
+    .dashboard-container { max-width: 1280px; margin: 0 auto; }
+    .welcome-panel { color: white; background: radial-gradient(circle at 84% 20%, rgba(194,255,82,.22), transparent 21rem), linear-gradient(120deg, #171a35, #302759 65%, #466275); border-radius: 1.5rem; padding: clamp(1.4rem, 3vw, 2.25rem); position: relative; overflow: hidden; box-shadow: 0 22px 60px rgba(31, 30, 70, .16); transform-style: preserve-3d; }
+    .welcome-panel > div { transform: translateZ(18px); }
+    .stat-card, .panel-card { transition: transform .25s ease, box-shadow .25s ease; }
+    .stat-card:hover, .panel-card:hover { box-shadow: 0 16px 38px rgba(25, 42, 70, .09); }
+    @media (prefers-reduced-motion: reduce) { .dashboard-sidebar a, .stat-card, .panel-card { transition: none; } }
+    .welcome-panel h1 { font-size: clamp(1.6rem, 3vw, 2.25rem); font-weight: 750; letter-spacing: -.035em; }
+    .live-status { color: #d3f8ed; font-size: .84rem; }
+    .live-dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: #57d7ae; margin-right: .4rem; }
+    .stat-card, .panel-card { border: 1px solid #e7ebf1; border-radius: 1rem; background: white; box-shadow: 0 8px 24px rgba(25, 42, 70, .045); }
+    .stat-card { height: 100%; padding: 1.15rem 1.25rem; }
+    .stat-label { color: #64748b; font-size: .8rem; font-weight: 650; }
+    .stat-value { color: #15243b; font-size: 1.8rem; font-weight: 750; line-height: 1.2; margin-top: .4rem; }
+    .panel-card { padding: clamp(1.1rem, 2.5vw, 1.5rem); }
+    .panel-title { color: #17263e; font-size: 1.05rem; font-weight: 720; }
+    .goal-list, .resume-list { list-style: none; padding: 0; margin: 0; }
+    .goal-item, .resume-item { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .9rem 0; border-bottom: 1px solid #edf0f5; }
+    .goal-item:last-child, .resume-item:last-child { border-bottom: 0; }
+    .goal-text { color: #26354c; font-weight: 550; overflow-wrap: anywhere; }
+    .goal-item.is-complete .goal-text { color: #718096; text-decoration: line-through; }
+    .icon-button { width: 2.25rem; height: 2.25rem; border: 1px solid #dbe3ed; border-radius: .65rem; background: white; color: #476078; }
+    .icon-button:hover { color: #0f766e; border-color: #74c9b3; }
+    .empty-state { border: 1px dashed #cbd5e1; border-radius: .8rem; color: #64748b; padding: 1.25rem; text-align: center; }
+    .resume-status { font-size: .75rem; font-weight: 650; border-radius: 99px; padding: .3rem .65rem; }
+    .resume-status.ready { background: #e6f7ef; color: #14734b; }
+    .resume-status.uploading { background: #fff4d6; color: #8a5a00; }
+    .resume-status.failed { background: #fee9e8; color: #ae3833; }
+    @media (max-width: 767.98px) {
+        .dashboard-shell { grid-template-columns: 1fr; }
+        .dashboard-sidebar { display: flex; gap: .35rem; overflow-x: auto; padding: .55rem .75rem; position: sticky; top: 0; z-index: 10; }
+        .dashboard-sidebar a { flex: 0 0 auto; margin: 0; padding: .6rem .7rem; font-size: .84rem; }
+        .dashboard-sidebar a span { white-space: nowrap; }
+        .sidebar-heading { display: none; }
+        .dashboard-main { padding: 1rem .8rem 2rem; }
+    }
 </style>
-
 {% endblock %}
 
 {% block content %}
+<div class="dashboard-shell" id="realtime-dashboard" data-session-url="{{ url_for('realtime_session') }}" data-dashboard-url="{{ url_for('dashboard_data_api') }}">
+    <aside class="dashboard-sidebar" aria-label="Dashboard navigation">
+        <div class="sidebar-heading">Workspace</div>
+        <a href="#overview"><i class="bi bi-grid-1x2" aria-hidden="true"></i><span>Overview</span></a>
+        <a href="#learning"><i class="bi bi-signpost-2" aria-hidden="true"></i><span>Learning plan</span></a>
+        <a href="#resumes"><i class="bi bi-file-earmark-person" aria-hidden="true"></i><span>My resumes</span></a>
+        <a href="{{ url_for('upload') }}"><i class="bi bi-cloud-arrow-up" aria-hidden="true"></i><span>Upload resume</span></a>
+        <a href="{{ url_for('chatbot') }}"><i class="bi bi-chat-square-text" aria-hidden="true"></i><span>AI mentor</span></a>
+        <a href="{{ url_for('careers') }}"><i class="bi bi-compass" aria-hidden="true"></i><span>Career paths</span></a>
+        <a href="{{ url_for('content_page', slug='learning-hub') }}"><i class="bi bi-mortarboard" aria-hidden="true"></i><span>Learning hub</span></a>
+    </aside>
 
-<div class="dashboard-wrapper">
+    <main class="dashboard-main">
+        <div class="dashboard-container">
+            {% if data_error %}
+            <div class="alert alert-warning" role="alert">We could not load your latest saved data. Refresh to try again.</div>
+            {% endif %}
 
-<!-- Sidebar -->
-<div class="sidebar">
-
-    <div class="sidebar-brand">
-        🚀 CareerPilot AI
-    </div>
-
-    <a href="#overview" class="sidebar-link">📊 Dashboard</a>
-    <a href="#skills" class="sidebar-link">💻 Skills</a>
-    <a href="#gaps" class="sidebar-link">📉 Skill Gaps</a>
-    <a href="#career" class="sidebar-link">🎯 Careers</a>
-    <a href="#roadmap" class="sidebar-link">🛣 Roadmap</a>
-    <a href="#certifications" class="sidebar-link">🏆 Certifications</a>
-    <a href="#projects" class="sidebar-link">💼 Projects</a>
-    <a href="#interview" class="sidebar-link">🎤 Interview Prep</a>
-
-    <hr>
-
-    <a href="{{ url_for('upload') }}" class="sidebar-link">
-        📄 Upload Resume
-    </a>
-
-    <a href="{{ url_for('logout') }}" class="sidebar-link">
-        🚪 Logout
-    </a>
-
-</div>
-
-<!-- Main Content -->
-<div class="dashboard-content">
-
-    <!-- Overview -->
-    <section id="overview" class="section-card">
-
-        <h2>Welcome, {{ username }}</h2>
-
-        <p class="text-muted">
-            AI Powered Career Guidance Dashboard
-        </p>
-
-    </section>
-
-    <!-- Scores -->
-    <div class="row mb-4">
-
-        <div class="col-md-4">
-
-            <div class="score-card">
-
-                <h6>ATS SCORE</h6>
-
-                <div class="score-value">
-                    {{ result.ats_score }}%
-                </div>
-
-            </div>
-
-        </div>
-
-        <div class="col-md-4">
-
-            <div class="score-card">
-
-                <h6>JOB READINESS</h6>
-
-                <div class="score-value">
-                    {{ result.job_readiness }}%
-                </div>
-
-            </div>
-
-        </div>
-
-        <div class="col-md-4">
-
-            <div class="score-card">
-
-                <h6>PROJECTS</h6>
-
-                <div class="score-value">
-                    {{ result.projects|length }}
-                </div>
-
-            </div>
-
-        </div>
-
-    </div>
-
-    <!-- Skills -->
-    <section id="skills" class="section-card">
-
-        <h3>Skills Found</h3>
-
-        {% for skill in result.skills %}
-            <span class="skill-badge skill">
-                {{ skill }}
-            </span>
-        {% endfor %}
-
-    </section>
-
-    <!-- Skill Gaps -->
-    <section id="gaps" class="section-card">
-
-        <h3>Skill Gaps</h3>
-
-        {% for gap in result.gaps %}
-            <span class="skill-badge gap">
-                {{ gap }}
-            </span>
-        {% endfor %}
-
-    </section>
-
-    <!-- Careers -->
-    <section id="career" class="section-card">
-
-        <h3>Career Recommendations</h3>
-
-        <div class="row">
-
-            {% for item in result.career %}
-
-            <div class="col-md-4 mb-3">
-
-                <div class="card">
-
-                    <div class="card-body">
-
-                        <h5>{{ item }}</h5>
-
-                        <p>
-                            Recommended based on your profile.
-                        </p>
-
+            <section id="overview" class="welcome-panel mb-4" aria-labelledby="welcome-title">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 position-relative" style="z-index:1">
+                    <div>
+                        <p class="mb-2 text-white-50">YOUR CAREER WORKSPACE</p>
+                        <h1 id="welcome-title" class="mb-2">Welcome back, {{ username }}</h1>
+                        <p class="mb-0 text-white-50">Keep your next step clear, focused, and moving forward.</p>
                     </div>
+                    <span class="live-status" aria-live="polite"><span class="live-dot" id="live-dot"></span><span id="live-status">Connecting to live updates</span></span>
+                </div>
+            </section>
 
+            <section class="row g-3 mb-4" aria-label="Career progress summary">
+                <div class="col-12 col-sm-6 col-xl-4">
+                    <article class="stat-card">
+                        <div class="stat-label">Learning goals completed</div>
+                        <div class="stat-value"><span id="completed-count">{{ completed_count }}</span> <span class="fs-6 fw-normal text-secondary">/ <span id="progress-count">{{ progress|length }}</span></span></div>
+                    </article>
+                </div>
+                <div class="col-12 col-sm-6 col-xl-4">
+                    <article class="stat-card">
+                        <div class="stat-label">Resumes in your workspace</div>
+                        <div class="stat-value" id="resume-count">{{ resumes|length }}</div>
+                    </article>
+                </div>
+                <div class="col-12 col-xl-4">
+                    <article class="stat-card">
+                        <div class="stat-label">Goals still in progress</div>
+                        <div class="stat-value" id="open-goal-count">{{ progress|length - completed_count }}</div>
+                    </article>
+                </div>
+            </section>
+
+            <div class="row g-4">
+                <div class="col-12 col-xl-7">
+                    <section class="panel-card" id="learning" aria-labelledby="learning-title">
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                            <div>
+                                <h2 class="panel-title mb-1" id="learning-title">Your learning plan</h2>
+                                <p class="text-secondary small mb-0">Track the skills and milestones you want to complete.</p>
+                            </div>
+                            <span class="badge text-bg-light"><span id="goal-badge-count">{{ progress|length }}</span> goals</span>
+                        </div>
+
+                        <form class="row g-2 mb-3" action="{{ url_for('add_progress') }}" method="post">
+                            <div class="col">
+                                <label class="visually-hidden" for="learning-goal">Add a learning goal</label>
+                                <input class="form-control" id="learning-goal" name="goal" maxlength="180" placeholder="e.g. Finish a SQL portfolio project" required>
+                            </div>
+                            <div class="col-auto">
+                                <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add goal</button>
+                            </div>
+                        </form>
+
+                        <ul class="goal-list" id="goal-list" aria-live="polite" {% if not progress %}hidden{% endif %}>
+                            {% for item in progress %}
+                            <li class="goal-item {% if item.completed %}is-complete{% endif %}">
+                                <div class="d-flex align-items-center gap-3 min-w-0">
+                                    <form action="{{ url_for('toggle_progress', progress_id=item.id) }}" method="post">
+                                        <input type="hidden" name="completed" value="{{ 'false' if item.completed else 'true' }}">
+                                        <button class="icon-button" type="submit" aria-label="{{ 'Mark incomplete' if item.completed else 'Mark complete' }}: {{ item.goal }}">
+                                            <i class="bi {{ 'bi-check-circle-fill text-success' if item.completed else 'bi-circle' }}" aria-hidden="true"></i>
+                                        </button>
+                                    </form>
+                                    <span class="goal-text">{{ item.goal }}</span>
+                                </div>
+                                <form action="{{ url_for('delete_progress', progress_id=item.id) }}" method="post">
+                                    <button class="icon-button" type="submit" aria-label="Remove goal: {{ item.goal }}"><i class="bi bi-trash3" aria-hidden="true"></i></button>
+                                </form>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        <div class="empty-state" id="goal-empty-state" {% if progress %}hidden{% endif %}>
+                            <i class="bi bi-signpost-2 fs-4 d-block mb-2" aria-hidden="true"></i>
+                            Your learning plan is ready. Add a goal to start tracking progress.
+                        </div>
+                    </section>
                 </div>
 
+                <div class="col-12 col-xl-5">
+                    <section class="panel-card h-100" id="resumes" aria-labelledby="resumes-title">
+                        <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                            <div>
+                                <h2 class="panel-title mb-1" id="resumes-title">Resume library</h2>
+                                <p class="text-secondary small mb-0">Your uploads and their latest status.</p>
+                            </div>
+                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('upload') }}">Upload</a>
+                        </div>
+                        <ul class="resume-list" id="resume-list" aria-live="polite" {% if not resumes %}hidden{% endif %}>
+                            {% for resume in resumes %}
+                            <li class="resume-item">
+                                <div class="d-flex align-items-center gap-3 min-w-0">
+                                    <i class="bi bi-file-earmark-pdf fs-4 text-primary" aria-hidden="true"></i>
+                                    <div class="min-w-0">
+                                        <div class="text-truncate fw-semibold">{{ resume.original_filename }}</div>
+                                        <div class="small text-secondary">{{ resume.created_at[:10] }}</div>
+                                    </div>
+                                </div>
+                                <span class="resume-status {{ resume.status }}">{{ resume.status|title }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        <div class="empty-state" id="resume-empty-state" {% if resumes %}hidden{% endif %}>
+                            <i class="bi bi-file-earmark-arrow-up fs-4 d-block mb-2" aria-hidden="true"></i>
+                            No resumes yet. Add one to keep your career materials together.
+                        </div>
+                    </section>
+                </div>
             </div>
-
-            {% endfor %}
-
         </div>
-
-    </section>
-
-    <!-- Roadmap -->
-    <section id="roadmap" class="section-card">
-
-        <h3>Learning Roadmap</h3>
-
-        {% for topic in result.roadmap %}
-
-        <div class="border rounded p-3 mb-3">
-
-            <h5>{{ topic.topic }}</h5>
-
-            <a href="{{ topic.youtube }}"
-               target="_blank"
-               class="btn btn-danger btn-sm">
-
-                Watch Playlist
-
-            </a>
-
-        </div>
-
-        {% endfor %}
-
-    </section>
-
-    <!-- Certifications -->
-    <section id="certifications" class="section-card">
-
-        <h3>Recommended Certifications</h3>
-
-        <ul class="list-group">
-
-            {% for cert in result.certifications %}
-
-            <li class="list-group-item">
-                {{ cert }}
-            </li>
-
-            {% endfor %}
-
-        </ul>
-
-    </section>
-
-    <!-- Projects -->
-    <section id="projects" class="section-card">
-
-        <h3>Project Recommendations</h3>
-
-        <ul class="list-group">
-
-            {% for project in result.projects %}
-
-            <li class="list-group-item">
-                {{ project }}
-            </li>
-
-            {% endfor %}
-
-        </ul>
-
-    </section>
-
-    <!-- Interview -->
-    <section id="interview" class="section-card">
-
-        <h3>Technical Interview Questions</h3>
-
-        <ul class="list-group mb-4">
-
-            {% for q in result.technical_questions %}
-
-            <li class="list-group-item">
-                {{ q }}
-            </li>
-
-            {% endfor %}
-
-        </ul>
-
-        <h3>HR Interview Questions</h3>
-
-        <ul class="list-group">
-
-            {% for q in result.hr_questions %}
-
-            <li class="list-group-item">
-                {{ q }}
-            </li>
-
-            {% endfor %}
-
-        </ul>
-
-    </section>
-
+    </main>
 </div>
-</div>
+{% endblock %}
 
+{% block extra_js %}
+<script type="module" src="{{ url_for('static', filename='js/dashboard-realtime.js') }}"></script>
 {% endblock %}
