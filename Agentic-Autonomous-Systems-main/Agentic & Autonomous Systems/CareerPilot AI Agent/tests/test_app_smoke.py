@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -57,6 +58,12 @@ class FlaskSmokeTests(unittest.TestCase):
             patch.object(db, "sign_up", return_value=db.AuthResult(None, None)),
             patch.object(db, "sign_in", return_value=self.auth_result),
             patch.object(db, "sign_out"),
+            patch.object(db, "update_password"),
+            patch.object(
+                db,
+                "verify_email_token",
+                return_value=self.auth_result,
+            ),
             patch.object(
                 db,
                 "get_dashboard_data",
@@ -112,7 +119,10 @@ class FlaskSmokeTests(unittest.TestCase):
     def test_vercel_entrypoint_and_rewrite_configuration(self):
         config = json.loads((PROJECT_ROOT / "vercel.json").read_text())
         self.assertEqual(config["rewrites"][0]["destination"], "/api/index")
-        self.assertIn("templates/**", config["functions"]["api/index.py"]["includeFiles"])
+        self.assertEqual(
+            config["functions"]["api/index.py"]["includeFiles"],
+            "{templates,static}/**",
+        )
 
         entrypoint_path = PROJECT_ROOT / "api" / "index.py"
         spec = importlib.util.spec_from_file_location("vercel_entrypoint", entrypoint_path)
@@ -299,6 +309,50 @@ class FlaskSmokeTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["response"], "Practice concise answers.")
+
+    def test_admin_profile_requires_server_controlled_app_metadata(self):
+        self.assertEqual(self.client.get("/admin").status_code, 302)
+        self._sign_in()
+        self.user.user_metadata["role"] = "admin"
+        self.assertEqual(self.client.get("/admin").status_code, 403)
+
+        self.user.app_metadata = {"role": "admin"}
+        response = self.client.get("/admin")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Administrator profile", response.data)
+        self.assertIn(b"smoke-user@example.test", response.data)
+
+    def test_invitation_confirmation_redirects_to_password_setup(self):
+        response = self.client.get(
+            "/auth/callback?token_hash=invite-token&type=invite"
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"], "/account/password")
+        db.verify_email_token.assert_called_once_with("invite-token", "invite")
+
+    def test_password_setup_requires_csrf_and_matching_passwords(self):
+        self.assertEqual(self.client.get("/account/password").status_code, 302)
+        self._sign_in()
+        page = self.client.get("/account/password")
+        self.assertEqual(page.status_code, 200)
+        token = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
+
+        invalid = self.client.post(
+            "/account/password",
+            data={"csrf_token": token, "password": "long-password", "password_confirmation": "different-password"},
+        )
+        self.assertEqual(invalid.status_code, 400)
+        db.update_password.assert_not_called()
+
+        saved = self.client.post(
+            "/account/password",
+            data={"csrf_token": token, "password": "long-password", "password_confirmation": "long-password"},
+        )
+        self.assertEqual(saved.status_code, 302)
+        self.assertEqual(saved.headers["Location"], "/dashboard")
+        db.update_password.assert_called_once_with(
+            self.auth_context["client"], "test-access-token", "test-refresh-token", "long-password"
+        )
 
 
 if __name__ == "__main__":

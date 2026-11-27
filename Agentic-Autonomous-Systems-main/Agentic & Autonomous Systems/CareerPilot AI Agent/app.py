@@ -19,6 +19,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     url_for,
 )
 from werkzeug.utils import secure_filename
@@ -102,6 +103,7 @@ def _set_auth_cookies(response, auth_session):
 @app.before_request
 def load_current_user():
     g.current_user = None
+    g.is_admin = False
     g.supabase_client = None
     g.auth_session = None
     g.clear_auth_cookies = False
@@ -128,6 +130,7 @@ def load_current_user():
         return None
 
     g.current_user = context["user"]
+    g.is_admin = _user_is_admin(g.current_user)
     g.supabase_client = context["client"]
     g.auth_session = context["session"]
     return None
@@ -156,6 +159,11 @@ def apply_security_headers(response):
     return response
 
 
+def _user_is_admin(user):
+    app_metadata = getattr(user, "app_metadata", None) or {}
+    return isinstance(app_metadata, dict) and app_metadata.get("role") == "admin"
+
+
 def login_required(view):
     @wraps(view)
     def wrapped_view(*args, **kwargs):
@@ -167,6 +175,27 @@ def login_required(view):
         return view(*args, **kwargs)
 
     return wrapped_view
+
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped_view(*args, **kwargs):
+        if g.current_user is None:
+            flash("Please sign in to continue.", "warning")
+            return redirect(url_for("login"))
+        if not g.is_admin:
+            return "Forbidden", 403
+        return view(*args, **kwargs)
+
+    return wrapped_view
+
+
+def _password_form_token():
+    token = session.get("password_form_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["password_form_token"] = token
+    return token
 
 
 def allowed_file(filename):
@@ -421,8 +450,59 @@ def auth_callback():
         return redirect(url_for("login"))
 
     g.auth_session = result.session
+    if token_type in {"invite", "recovery"}:
+        flash("Your email link is confirmed. Set a password to continue.", "success")
+        return redirect(url_for("set_password"))
     flash("Email confirmed. Your account is ready.", "success")
     return redirect(url_for("dashboard"))
+
+
+@app.route("/admin")
+@admin_required
+def admin_profile():
+    metadata = getattr(g.current_user, "user_metadata", None) or {}
+    return render_template(
+        "admin.html",
+        admin_email=getattr(g.current_user, "email", ""),
+        admin_name=metadata.get("display_name") or "PlacementCare Administrator",
+    )
+
+
+@app.route("/account/password", methods=["GET", "POST"])
+@login_required
+def set_password():
+    if request.method == "POST":
+        submitted_token = request.form.get("csrf_token", "")
+        expected_token = session.get("password_form_token", "")
+        if not expected_token or not hmac.compare_digest(submitted_token, expected_token):
+            return "Invalid form submission", 400
+
+        password = request.form.get("password", "")
+        password_confirmation = request.form.get("password_confirmation", "")
+        if len(password) < 8 or len(password) > 128:
+            flash("Choose a password between 8 and 128 characters.", "warning")
+            return render_template("set_password.html", csrf_token=_password_form_token()), 400
+        if password != password_confirmation:
+            flash("The passwords do not match. Try again.", "warning")
+            return render_template("set_password.html", csrf_token=_password_form_token()), 400
+
+        try:
+            db.update_password(
+                g.supabase_client,
+                g.auth_session.access_token,
+                g.auth_session.refresh_token,
+                password,
+            )
+        except Exception:
+            current_app.logger.exception("Could not update the account password")
+            flash("Your password could not be updated. Please try again.", "danger")
+            return render_template("set_password.html", csrf_token=_password_form_token()), 503
+
+        session.pop("password_form_token", None)
+        flash("Your password has been set.", "success")
+        return redirect(url_for("admin_profile" if g.is_admin else "dashboard"))
+
+    return render_template("set_password.html", csrf_token=_password_form_token())
 
 
 @app.route("/dashboard")
